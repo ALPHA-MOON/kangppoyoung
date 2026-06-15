@@ -1,6 +1,7 @@
 # Claude
 .claude/
 CLAUDE.md
+.omc/
 
 # Dependencies
 node_modules/

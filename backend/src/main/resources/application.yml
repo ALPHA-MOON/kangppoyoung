@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: policyfund-backend
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  # real key via OPENAI_API_KEY env; default sk-noop lets the context start without a key (only real calls fail)
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:sk-noop}
+      chat:
+        options:
+          model: gpt-4o
+
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
