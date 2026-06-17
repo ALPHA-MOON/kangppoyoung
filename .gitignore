@@ -34,4 +34,3 @@ __pycache__/
 .venv/
 venv/
 # 파이프라인 산출물(원본 PDF 변환 결과)
-/out/

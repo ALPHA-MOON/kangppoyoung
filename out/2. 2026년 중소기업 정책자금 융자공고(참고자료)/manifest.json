@@ -1,0 +1,100 @@
+{
+  "status": "ok",
+  "document_id": "d_548f558c915ea20337d0176dae8f1320a4562afd26066e077dee6e83dc26bc07",
+  "source_sha256": "548f558c915ea20337d0176dae8f1320a4562afd26066e077dee6e83dc26bc07",
+  "file_name": "2. 2026년 중소기업 정책자금 융자공고(참고자료).pdf",
+  "pipeline_version": "1.0.0",
+  "counts": {
+    "chunks": 731,
+    "by_type": {
+      "text": 127,
+      "list-item": 143,
+      "table-row": 415,
+      "footnote": 19,
+      "warning": 3,
+      "infographic": 24
+    },
+    "pages": 47,
+    "scanned_pages": 0
+  },
+  "extract_methods": {
+    "pdf_text": 707,
+    "layout_analysis": 24
+  },
+  "outputs": {
+    "xml": "C:\\kangppoyoung\\out\\2. 2026년 중소기업 정책자금 융자공고(참고자료)\\chunks.xml",
+    "jsonl": "C:\\kangppoyoung\\out\\2. 2026년 중소기업 정책자금 융자공고(참고자료)\\chunks.jsonl",
+    "manifest": "C:\\kangppoyoung\\out\\2. 2026년 중소기업 정책자금 융자공고(참고자료)\\manifest.json"
+  },
+  "review_required": {
+    "count": 35,
+    "reasons": {
+      "table_fallback": 11,
+      "low_confidence": 35,
+      "offline_fallback": 24
+    },
+    "chunk_ids": [
+      "c_a3d1c323d3a3a06f7b70b813",
+      "c_a8ebb1b3bb0a083a3a0acb8a",
+      "c_86d274f1d942053f41f86975",
+      "c_431572a88b9d552d4930bf21",
+      "c_fb8b86b937431145ac37cab8",
+      "c_3fda31a576123d3c82c94331",
+      "c_fed8add7e0d4180c126cb625",
+      "c_e3bc147a7c6f0a47e1862f66",
+      "c_9e2f0c68b133d76fe7703794",
+      "c_7e53686b4f4ef45fd20a69c6",
+      "c_608e6c0a310f6b2fd232acb4",
+      "c_17ef92cd38bf4d24154d1a20",
+      "c_93eaf98aa17f9f3a8dd3dfc6",
+      "c_6d59bcbb2ecb226a222cfd0d",
+      "c_af0b78d19dde90ba5314d37c",
+      "c_453af651822af1f787c183de",
+      "c_0067927ac7f9d26bd066f024",
+      "c_186dee56f4484c9c53c73b0e",
+      "c_9150e341b6da614126e63b24",
+      "c_b935d37302c1a0ef4e383cc0",
+      "c_ea828e61b618f25a1294a5f7",
+      "c_84383900f7f33447da09fe3c",
+      "c_f7d9e23f0a49542d09d11353",
+      "c_765a807ea1dde12c36d31e87",
+      "c_f49ad90233fb8ab88032d02c",
+      "c_c8c596dece811e9c91862cba",
+      "c_a8866615a661ee059ecc7b94",
+      "c_465a5c52bb4dbccc3a7cb82b",
+      "c_8e103b8eeb32b25b8d33b577",
+      "c_7683a937687dbecb39066563",
+      "c_8d9c6afb21995a951ff6fb3b",
+      "c_e20b5770a908959811a0ce27",
+      "c_6a590d2a0fd907ebad4c6c58",
+      "c_78f99d12d678025e5fadf792",
+      "c_95cf7a5b0a4fd08c705be501"
+    ]
+  },
+  "jsonl_skipped": 0,
+  "offline": true,
+  "provider": "offline",
+  "timings_ms": {
+    "build_ms": 2840,
+    "serialize_ms": 79,
+    "verify_ms": 2867
+  },
+  "verification": {
+    "checks": {
+      "text_coverage_ok": true,
+      "chunk_id_unique": true,
+      "xml_jsonl_parity": true,
+      "xml_roundtrip": true,
+      "relations_intact": true
+    },
+    "metrics": {
+      "char_recall": 0.9999,
+      "text_coverage": 0.9999,
+      "word_recall": 0.9892,
+      "chars_missing": 3,
+      "orig_chars": 21694
+    },
+    "issues": [],
+    "passed": true
+  }
+}

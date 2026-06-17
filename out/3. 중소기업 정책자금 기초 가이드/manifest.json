@@ -1,0 +1,79 @@
+{
+  "status": "ok",
+  "document_id": "d_1f3e4bcf49b9b15fba4aeae8caf569f480724ceae27795e2b19ce702110fb64d",
+  "source_sha256": "1f3e4bcf49b9b15fba4aeae8caf569f480724ceae27795e2b19ce702110fb64d",
+  "file_name": "3. 중소기업 정책자금 기초 가이드.pdf",
+  "pipeline_version": "1.0.0",
+  "counts": {
+    "chunks": 69,
+    "by_type": {
+      "infographic": 14,
+      "text": 46,
+      "footnote": 7,
+      "list-item": 1,
+      "warning": 1
+    },
+    "pages": 4,
+    "scanned_pages": 0
+  },
+  "extract_methods": {
+    "layout_analysis": 14,
+    "pdf_text": 55
+  },
+  "outputs": {
+    "xml": "C:\\kangppoyoung\\out\\3. 중소기업 정책자금 기초 가이드\\chunks.xml",
+    "jsonl": "C:\\kangppoyoung\\out\\3. 중소기업 정책자금 기초 가이드\\chunks.jsonl",
+    "manifest": "C:\\kangppoyoung\\out\\3. 중소기업 정책자금 기초 가이드\\manifest.json"
+  },
+  "review_required": {
+    "count": 15,
+    "reasons": {
+      "offline_fallback": 14,
+      "low_confidence": 15,
+      "table_fallback": 1
+    },
+    "chunk_ids": [
+      "c_8fb1c850bd35aa57762fef16",
+      "c_bbb2a3468979f4cc21e9e76a",
+      "c_260e56a831ba8789ee6c5f03",
+      "c_1516599532a769086cbfb271",
+      "c_778eefb9b797eca044433917",
+      "c_be42657b5bb51d153ab33512",
+      "c_4e45043cd883e942a488fc62",
+      "c_bf8d9cbb493bddfc430fd656",
+      "c_6a4bef4345700eb0307805cc",
+      "c_ea15731dc8f02d54e23cb0fa",
+      "c_21e8a73c148affff598e15d1",
+      "c_6fccf3802da9d88b100597da",
+      "c_2f3f497ed6ca425fe065c6a2",
+      "c_45d9725ca5045a9739429646",
+      "c_f068b2f24b9e3f2905fd40b0"
+    ]
+  },
+  "jsonl_skipped": 0,
+  "offline": true,
+  "provider": "offline",
+  "timings_ms": {
+    "build_ms": 181,
+    "serialize_ms": 12,
+    "verify_ms": 172
+  },
+  "verification": {
+    "checks": {
+      "text_coverage_ok": true,
+      "chunk_id_unique": true,
+      "xml_jsonl_parity": true,
+      "xml_roundtrip": true,
+      "relations_intact": true
+    },
+    "metrics": {
+      "char_recall": 1.0,
+      "text_coverage": 1.0,
+      "word_recall": 0.9634,
+      "chars_missing": 0,
+      "orig_chars": 1638
+    },
+    "issues": [],
+    "passed": true
+  }
+}
