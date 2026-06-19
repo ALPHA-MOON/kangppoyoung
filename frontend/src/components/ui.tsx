@@ -25,16 +25,47 @@ export function SourceChip({ article }: { article: Article }) {
   )
 }
 
-/** 근거 조항 카드 (원문 그대로 표시) */
+/**
+ * 근거 조항 본문(embedding_text)은 불릿·"(출처: …)" 꼬리표가 한 줄로 평탄화되어 있다.
+ * 가독성을 위해 (1) 끝의 "(출처: …)" 를 분리하고 (2) 불릿(•·※·○)·"- " 리스트 항목마다 줄바꿈한다.
+ */
+function splitArticleText(raw: string): { lines: string[]; source: string | null } {
+  let body = (raw ?? '').trim()
+  let source: string | null = null
+
+  const i = body.lastIndexOf('(출처:')
+  if (i >= 0) {
+    source = body.slice(i).replace(/^\(\s*/, '').replace(/\)\s*$/, '').trim()
+    body = body.slice(0, i).trim()
+  }
+
+  const withBreaks = body
+    .replace(/\s*([•※○])\s*/g, '\n$1 ') // 불릿 앞에서 줄바꿈
+    .replace(/(^|\s)-\s+/g, '\n- ') // "- " 리스트 항목 앞에서 줄바꿈
+  const lines = withBreaks
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  return { lines: lines.length ? lines : body ? [body] : [], source }
+}
+
+/** 근거 조항 카드 (원문 그대로 표시, 단락별 줄바꿈) */
 export function ArticleCard({ article }: { article: Article }) {
+  const { lines, source } = splitArticleText(article.text)
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
         <TypeBadge type={article.docType} />
         <span className="text-sm font-semibold text-slate-800">{article.docTitle}</span>
         <span className="text-xs text-slate-400">{article.articleNo}</span>
       </div>
-      <p className="text-sm leading-relaxed text-slate-600">{article.text}</p>
+      <div className="space-y-1 text-sm leading-relaxed text-slate-600">
+        {lines.map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
+      </div>
+      {source && <p className="mt-2 text-xs text-slate-400">{source}</p>}
     </div>
   )
 }
