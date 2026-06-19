@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -22,14 +23,18 @@ import java.util.Map;
  * (2) 각 히트를 문서 내 reading-order 이웃(seq_no ± NEIGHBOR_WINDOW)으로 확장한다.
  * 절차의 각 단계가 별도 청크로 쪼개져 있어도, 한 단계만 히트하면 그 섹션의 연속 청크가 함께 끌려와
  * 합성 LLM 이 전체 절차·목록을 순서대로 재구성할 수 있다. 히트를 먼저 담아 evidence 는 관련도 순을 유지.
+ * 또한 한 섹션(문서 + article_no)이 히트를 독점하지 못하도록 섹션당 히트 수를 MAX_PER_SECTION 으로
+ * 제한해, 과대표집된 하위 섹션이 정답 섹션을 후보에서 밀어내는 쏠림을 막는다(전체 섹션 본문은 이웃 확장이 회수).
  * 브루트포스(MySQL 8.0 호환, VECTOR 미사용), search.retrieval=vector 일 때 활성화.
  */
 @Component
 @ConditionalOnProperty(name = "search.retrieval", havingValue = "vector")
 public class VectorRetrievalAdapter implements RetrievalPort {
 
-    private static final int TOP_K = 40;            // 코사인 점수 상위 정밀 히트 수
+    private static final int TOP_K = 40;            // 코사인 점수 상위 정밀 히트 수(섹션 다양화 적용)
+    private static final int MAX_PER_SECTION = 6;   // 히트 선정 시 한 섹션(문서 + article_no) 최대 수
     private static final int NEIGHBOR_WINDOW = 6;   // 각 히트의 reading-order 이웃 확장 폭(±)
+    private static final int MAX_PER_SECTION_FINAL = 18; // 확장 후 최종 후보에서 섹션당 최대 수(재범람 차단)
     private static final int MAX_CANDIDATES = 90;   // 합성기에 넘길 최대 후보 수(컨텍스트 상한)
 
     private final ChunkEmbeddingRepository repository;
@@ -55,13 +60,26 @@ public class VectorRetrievalAdapter implements RetrievalPort {
             bySeq.put(seqKey(e.getDocumentId(), e.getSeqNo()), e);
         }
 
-        // 1) 코사인 상위 TOP_K 정밀 히트.
-        List<ChunkEmbeddingEntity> hits = all.stream()
+        // 1) 코사인 점수 내림차순 정렬 후, 섹션(문서 + article_no)당 MAX_PER_SECTION 개까지만 받아
+        //    TOP_K 개의 '정밀 히트'를 섹션 다양하게 고른다(과대표집 섹션의 독점 방지).
+        List<Scored> ranked = all.stream()
                 .map(entity -> new Scored(entity, cosine(queryVector, parse(entity.getEmbeddingJson()))))
                 .sorted(Comparator.comparingDouble(Scored::score).reversed())
-                .limit(TOP_K)
-                .map(Scored::entity)
                 .toList();
+        List<ChunkEmbeddingEntity> hits = new ArrayList<>();
+        Map<String, Integer> perSection = new HashMap<>();
+        for (Scored s : ranked) {
+            if (hits.size() >= TOP_K) {
+                break;
+            }
+            String section = sectionKey(s.entity());
+            int count = perSection.getOrDefault(section, 0);
+            if (count >= MAX_PER_SECTION) {
+                continue; // 과대표집 섹션은 건너뛰어 다른 섹션에 자리를 양보.
+            }
+            perSection.put(section, count + 1);
+            hits.add(s.entity());
+        }
 
         // 2) 히트(관련도 순) 먼저 담고, 그다음 각 히트의 같은 섹션 이웃을 확장(dedup, 상한 적용).
         LinkedHashMap<String, ChunkEmbeddingEntity> picked = new LinkedHashMap<>();
@@ -78,10 +96,11 @@ public class VectorRetrievalAdapter implements RetrievalPort {
             }
         }
 
-        return picked.values().stream()
-                .limit(MAX_CANDIDATES)
+        // 확장 후에도 한 섹션이 후보를 독점(재범람)하지 못하도록 섹션당 최종 한도를 적용.
+        List<Article> candidates = picked.values().stream()
                 .map(VectorRetrievalAdapter::toArticle)
                 .toList();
+        return CandidateMerge.capBySection(candidates, MAX_PER_SECTION_FINAL, MAX_CANDIDATES);
     }
 
     private static void addNeighbor(LinkedHashMap<String, ChunkEmbeddingEntity> picked,
@@ -97,6 +116,11 @@ public class VectorRetrievalAdapter implements RetrievalPort {
 
     private static String seqKey(String documentId, int seqNo) {
         return documentId + '#' + seqNo;
+    }
+
+    /** 섹션 키: 문서 + article_no(heading). 섹션 다양화 캡의 단위. */
+    private static String sectionKey(ChunkEmbeddingEntity e) {
+        return e.getDocumentId() + '|' + (e.getArticleNo() == null ? "" : e.getArticleNo());
     }
 
     private static Article toArticle(ChunkEmbeddingEntity e) {

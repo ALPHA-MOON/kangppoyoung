@@ -86,6 +86,24 @@ class VectorRetrievalAdapterTest {
     }
 
     @Test
+    void diversityCap_letsUnderRepresentedSectionIn() {
+        // 한 섹션(dA|A절차)이 50개로 과대표집, 다른 섹션(dB|B절차)은 1개. 둘 다 질의와 동일(코사인 1.0).
+        // 섹션 캡이 없으면 dA 가 top-K(40)를 독점해 dB 가 후보에서 빠지고, dB 는 다른 문서라 이웃 확장도 못 미친다.
+        String query = "정책자금 융자 신청 서류 제출 기한";
+        List<ChunkEmbeddingEntity> rows = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            rows.add(entity("a" + i, "dA", i, "a.pdf", "text", "A절차", query));
+        }
+        rows.add(entity("bOnly", "dB", 0, "b.pdf", "text", "B절차", query));
+        when(repository.findAll()).thenReturn(rows);
+
+        List<Article> results = adapter.search(query);
+
+        // 섹션 다양화 덕분에 과소표집 섹션(dB)의 청크가 후보에 포함된다.
+        assertThat(results).anyMatch(a -> "dB".equals(a.docId()));
+    }
+
+    @Test
     void capsCandidatesAtMax() {
         // 한 문서에 연속 seq 청크를 충분히 많이 두어, 히트 + 이웃 확장이 상한을 넘게 만든다.
         List<ChunkEmbeddingEntity> rows = new ArrayList<>();
