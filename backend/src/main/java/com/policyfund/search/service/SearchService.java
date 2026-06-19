@@ -5,7 +5,8 @@ import com.policyfund.search.domain.SearchHistoryRepository;
 import com.policyfund.search.dto.Article;
 import com.policyfund.search.dto.SearchHistoryItem;
 import com.policyfund.search.dto.SearchResult;
-import com.policyfund.search.retrieval.QueryExpander;
+import com.policyfund.search.query.QueryAnalyzer;
+import com.policyfund.search.query.QueryPlan;
 import com.policyfund.search.retrieval.RetrievalPort;
 import com.policyfund.search.synth.AnswerSynthesizer;
 import org.springframework.data.domain.PageRequest;
@@ -18,14 +19,14 @@ import java.util.List;
 @Service
 public class SearchService {
 
-    private final QueryExpander queryExpander;
+    private final QueryAnalyzer queryAnalyzer;
     private final RetrievalPort retrieval;
     private final AnswerSynthesizer synthesizer;
     private final SearchHistoryRepository history;
 
-    public SearchService(QueryExpander queryExpander, RetrievalPort retrieval,
+    public SearchService(QueryAnalyzer queryAnalyzer, RetrievalPort retrieval,
                          AnswerSynthesizer synthesizer, SearchHistoryRepository history) {
-        this.queryExpander = queryExpander;
+        this.queryAnalyzer = queryAnalyzer;
         this.retrieval = retrieval;
         this.synthesizer = synthesizer;
         this.history = history;
@@ -33,10 +34,10 @@ public class SearchService {
 
     @Transactional
     public SearchResult search(String query) {
-        // 검색은 확장 질의로(회수율↑), 답변 합성은 원 질의로(정밀도 유지) 수행한다.
-        String retrievalQuery = queryExpander.expand(query);
-        List<Article> candidates = retrieval.search(retrievalQuery);
-        SearchResult result = synthesizer.synthesize(query, candidates);
+        // 1) 질의 분석(의도 구조화) → 2) 확장 질의로 검색(회수율↑) → 3) 분석+원 질의로 답변 합성.
+        QueryPlan plan = queryAnalyzer.analyze(query);
+        List<Article> candidates = retrieval.search(plan.retrievalQuery(query));
+        SearchResult result = synthesizer.synthesize(query, plan, candidates);
         history.save(new SearchHistoryEntity(query, result.answer(), result, Instant.now()));
         return result;
     }
