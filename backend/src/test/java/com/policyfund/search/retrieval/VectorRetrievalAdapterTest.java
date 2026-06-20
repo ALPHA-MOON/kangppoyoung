@@ -104,6 +104,26 @@ class VectorRetrievalAdapterTest {
     }
 
     @Test
+    void documentQuota_includesRelevantOtherDocument_andGatesIrrelevant() {
+        String query = "정책자금 융자 신청 서류 제출 기한";
+        List<ChunkEmbeddingEntity> rows = new ArrayList<>();
+        // 우세 문서 dMain: 8섹션 × 6청크 = 48, 모두 질의와 동일(코사인 1.0). 단독으로 top-K를 채울 수 있음.
+        for (int i = 0; i < 48; i++) {
+            rows.add(entity("m" + i, "dMain", i, "main.pdf", "text", "S" + (i / 6), query));
+        }
+        // 관련 있는 다른 문서 dAlt(질의 동일, 1청크) — 문서 쿼터가 없으면 dMain 물량에 밀려 후보에서 빠짐.
+        rows.add(entity("alt", "dAlt", 0, "alt.pdf", "text", "A", query));
+        // 무관한 문서 dNoise(질의 토큰 0) — 관련도 게이트에서 제외되어야 함.
+        rows.add(entity("noise", "dNoise", 0, "noise.pdf", "text", "N", "사무 비품 청소 일정 공지"));
+        when(repository.findAll()).thenReturn(rows);
+
+        List<Article> results = adapter.search(query);
+
+        assertThat(results).anyMatch(a -> "dAlt".equals(a.docId()));    // 문서 쿼터로 포함
+        assertThat(results).noneMatch(a -> "dNoise".equals(a.docId())); // 관련도 게이트로 제외
+    }
+
+    @Test
     void capsCandidatesAtMax() {
         // 한 문서에 연속 seq 청크를 충분히 많이 두어, 히트 + 이웃 확장이 상한을 넘게 만든다.
         List<ChunkEmbeddingEntity> rows = new ArrayList<>();

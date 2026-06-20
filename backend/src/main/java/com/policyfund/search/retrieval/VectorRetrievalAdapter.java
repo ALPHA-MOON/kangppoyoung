@@ -25,6 +25,8 @@ import java.util.Map;
  * 합성 LLM 이 전체 절차·목록을 순서대로 재구성할 수 있다. 히트를 먼저 담아 evidence 는 관련도 순을 유지.
  * 또한 한 섹션(문서 + article_no)이 히트를 독점하지 못하도록 섹션당 히트 수를 MAX_PER_SECTION 으로
  * 제한해, 과대표집된 하위 섹션이 정답 섹션을 후보에서 밀어내는 쏠림을 막는다(전체 섹션 본문은 이웃 확장이 회수).
+ * 나아가 히트 선정 시 관련도 게이트를 통과한 각 문서에 최소 쿼터(MIN_PER_DOC)를 먼저 배정해, 한 문서가
+ * 양적으로 우세해도 다른 문서의 관련 청크가 후보에 들어오도록 보장한다(다문서 커버리지, P1).
  * 브루트포스(MySQL 8.0 호환, VECTOR 미사용), search.retrieval=vector 일 때 활성화.
  */
 @Component
@@ -33,6 +35,8 @@ public class VectorRetrievalAdapter implements RetrievalPort {
 
     private static final int TOP_K = 40;            // 코사인 점수 상위 정밀 히트 수(섹션 다양화 적용)
     private static final int MAX_PER_SECTION = 6;   // 히트 선정 시 한 섹션(문서 + article_no) 최대 수
+    private static final int MIN_PER_DOC = 4;       // 문서 균형: 관련도 게이트 통과 문서당 최소 히트 쿼터
+    private static final double RELEVANCE_RATIO = 0.70; // 문서 쿼터 관련도 게이트(최상위 점수 대비, eval 튜닝)
     private static final int NEIGHBOR_WINDOW = 6;   // 각 히트의 reading-order 이웃 확장 폭(±)
     private static final int MAX_PER_SECTION_FINAL = 18; // 확장 후 최종 후보에서 섹션당 최대 수(재범람 차단)
     private static final int MAX_CANDIDATES = 90;   // 합성기에 넘길 최대 후보 수(컨텍스트 상한)
@@ -60,26 +64,38 @@ public class VectorRetrievalAdapter implements RetrievalPort {
             bySeq.put(seqKey(e.getDocumentId(), e.getSeqNo()), e);
         }
 
-        // 1) 코사인 점수 내림차순 정렬 후, 섹션(문서 + article_no)당 MAX_PER_SECTION 개까지만 받아
-        //    TOP_K 개의 '정밀 히트'를 섹션 다양하게 고른다(과대표집 섹션의 독점 방지).
+        // 1) 문서 균형 히트 선정. 코사인 내림차순 정렬 후
+        //    Phase 1: 관련도 게이트(top·RELEVANCE_RATIO)를 통과한 각 문서에 MIN_PER_DOC 쿼터 우선 배정,
+        //    Phase 2: 남은 자리를 전역 점수 순으로 TOP_K 까지 채움. 둘 다 섹션캡(MAX_PER_SECTION) 준수.
+        //    한 문서가 양적으로 우세해 다른 문서의 관련 청크를 후보에서 밀어내는 것을 막는다(다문서 커버리지).
         List<Scored> ranked = all.stream()
                 .map(entity -> new Scored(entity, cosine(queryVector, parse(entity.getEmbeddingJson()))))
                 .sorted(Comparator.comparingDouble(Scored::score).reversed())
                 .toList();
-        List<ChunkEmbeddingEntity> hits = new ArrayList<>();
+        LinkedHashMap<String, ChunkEmbeddingEntity> hitMap = new LinkedHashMap<>();
         Map<String, Integer> perSection = new HashMap<>();
-        for (Scored s : ranked) {
-            if (hits.size() >= TOP_K) {
-                break;
+        if (!ranked.isEmpty()) {
+            double floor = ranked.get(0).score() * RELEVANCE_RATIO;
+            Map<String, Integer> perDoc = new HashMap<>();
+            for (Scored s : ranked) { // Phase 1: 문서별 최소 쿼터(게이트 통과 청크만)
+                if (s.score() < floor || hitMap.size() >= TOP_K) {
+                    break; // 내림차순이므로 floor 미만이면 이후도 전부 미달.
+                }
+                if (perDoc.getOrDefault(s.entity().getDocumentId(), 0) >= MIN_PER_DOC) {
+                    continue;
+                }
+                if (tryAddHit(hitMap, perSection, s.entity())) {
+                    perDoc.merge(s.entity().getDocumentId(), 1, Integer::sum);
+                }
             }
-            String section = sectionKey(s.entity());
-            int count = perSection.getOrDefault(section, 0);
-            if (count >= MAX_PER_SECTION) {
-                continue; // 과대표집 섹션은 건너뛰어 다른 섹션에 자리를 양보.
+            for (Scored s : ranked) { // Phase 2: 전역 점수로 채움
+                if (hitMap.size() >= TOP_K) {
+                    break;
+                }
+                tryAddHit(hitMap, perSection, s.entity());
             }
-            perSection.put(section, count + 1);
-            hits.add(s.entity());
         }
+        List<ChunkEmbeddingEntity> hits = new ArrayList<>(hitMap.values());
 
         // 2) 히트(관련도 순) 먼저 담고, 그다음 각 히트의 같은 섹션 이웃을 확장(dedup, 상한 적용).
         LinkedHashMap<String, ChunkEmbeddingEntity> picked = new LinkedHashMap<>();
@@ -101,6 +117,21 @@ public class VectorRetrievalAdapter implements RetrievalPort {
                 .map(VectorRetrievalAdapter::toArticle)
                 .toList();
         return CandidateMerge.capBySection(candidates, MAX_PER_SECTION_FINAL, MAX_CANDIDATES);
+    }
+
+    /** 섹션캡·중복을 지키며 hitMap 에 히트 추가. 추가되면 true. */
+    private static boolean tryAddHit(LinkedHashMap<String, ChunkEmbeddingEntity> hitMap,
+                                     Map<String, Integer> perSection, ChunkEmbeddingEntity e) {
+        if (hitMap.containsKey(e.getChunkId())) {
+            return false;
+        }
+        String section = sectionKey(e);
+        if (perSection.getOrDefault(section, 0) >= MAX_PER_SECTION) {
+            return false;
+        }
+        hitMap.put(e.getChunkId(), e);
+        perSection.merge(section, 1, Integer::sum);
+        return true;
     }
 
     private static void addNeighbor(LinkedHashMap<String, ChunkEmbeddingEntity> picked,

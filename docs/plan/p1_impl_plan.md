@@ -36,7 +36,7 @@
 의사코드:
 ```text
 float top = ranked.get(0).score();
-double floor = top * RELEVANCE_RATIO;            // 상대 게이트 (예: 0.85)
+double floor = top * RELEVANCE_RATIO;            // 상대 게이트 (예: 0.70)
 LinkedHashSet<String> hitIds; Map<String,Integer> perDoc, perSection;
 
 // Phase 1: 문서별 최소 쿼터 (관련도 게이트)
@@ -63,7 +63,7 @@ for (Scored s : ranked) {
 | 파라미터 | 초기값 | 의미 |
 |---|---|---|
 | `MIN_PER_DOC` | 4 | 관련도 통과 문서당 최소 히트 수 |
-| `RELEVANCE_RATIO` | 0.85 | 상대 게이트(top 대비). 미달 청크는 쿼터에서 제외 |
+| `RELEVANCE_RATIO` | 0.70 | 상대 게이트(top 대비). 미달 청크는 쿼터에서 제외. doc2/3가 점수보다 물량에 밀리는 관측을 반영해 관대하게 시작, eval로 튜닝 |
 | `TOP_K` | 40 | 전체 히트 수(기존) |
 | `MAX_PER_SECTION` | 6 | 섹션당 히트 캡(기존) |
 
