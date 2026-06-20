@@ -35,8 +35,8 @@ public class VectorRetrievalAdapter implements RetrievalPort {
 
     private static final int TOP_K = 40;            // 코사인 점수 상위 정밀 히트 수(섹션 다양화 적용)
     private static final int MAX_PER_SECTION = 6;   // 히트 선정 시 한 섹션(문서 + article_no) 최대 수
-    private static final int MIN_PER_DOC = 4;       // 문서 균형: 관련도 게이트 통과 문서당 최소 히트 쿼터
-    private static final double RELEVANCE_RATIO = 0.70; // 문서 쿼터 관련도 게이트(최상위 점수 대비, eval 튜닝)
+    private static final int MIN_PER_DOC = 3;       // 문서 균형: 관련도 게이트 통과 문서당 최소 히트 쿼터(튜닝)
+    private static final double RELEVANCE_RATIO = 0.75; // 문서 쿼터 관련도 게이트(최상위 점수 대비, 튜닝)
     private static final int NEIGHBOR_WINDOW = 6;   // 각 히트의 reading-order 이웃 확장 폭(±)
     private static final int MAX_PER_SECTION_FINAL = 18; // 확장 후 최종 후보에서 섹션당 최대 수(재범람 차단)
     private static final int MAX_CANDIDATES = 90;   // 합성기에 넘길 최대 후보 수(컨텍스트 상한)
