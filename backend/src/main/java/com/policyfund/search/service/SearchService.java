@@ -85,4 +85,22 @@ public class SearchService {
                         String.valueOf(h.getId()), h.getQuery(), h.getCreatedAt(), h.getResultJson()))
                 .toList();
     }
+
+    /** 검색 기록 1건 삭제. 숫자 아닌/미존재 id 는 조용히 무시(멱등) — 계약상 id 는 문자열이며 204 를 보장한다. */
+    @Transactional
+    public void deleteHistory(String id) {
+        long parsed;
+        try {
+            parsed = Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            return; // 숫자 아닌 id 는 멱등하게 무시
+        }
+        history.findById(parsed).ifPresent(history::delete);
+    }
+
+    /** 검색 기록 전체 삭제(단일 DELETE). */
+    @Transactional
+    public void clearHistory() {
+        history.deleteAllInBatch();
+    }
 }

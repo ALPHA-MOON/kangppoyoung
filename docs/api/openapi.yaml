@@ -70,6 +70,33 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SearchHistoryItem'
+    delete:
+      tags: [search]
+      operationId: deleteAllSearchHistory
+      summary: 검색(채팅) 기록 전체 삭제
+      description: 저장된 모든 질의·답변 이력을 삭제한다. 응답 본문 없음.
+      responses:
+        '204':
+          description: 전체 삭제됨
+
+  /search/history/{id}:
+    delete:
+      tags: [search]
+      operationId: deleteSearchHistory
+      summary: 특정 검색(채팅) 기록 항목 1건 삭제
+      description: >-
+        SearchHistoryItem.id 에 해당하는 항목 1건을 삭제한다.
+        멱등(idempotent) 동작: 존재하지 않는 id 도 204 를 반환한다.
+        서버 내부적으로 Long 을 문자열화하여 id 로 노출한다.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: 삭제할 검색 기록 항목의 id (SearchHistoryItem.id)
+      responses:
+        '204':
+          description: 삭제됨(존재하지 않는 id 도 동일)
 
   /search/examples:
     get:

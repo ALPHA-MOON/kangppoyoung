@@ -45,6 +45,18 @@ public class SearchController {
         return service.history(page, Math.min(size, 100));
     }
 
+    @DeleteMapping("/history/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteHistory(@PathVariable String id) {
+        service.deleteHistory(id);
+    }
+
+    @DeleteMapping("/history")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void clearHistory() {
+        service.clearHistory();
+    }
+
     public record AddExampleRequest(@NotBlank String text) {}
 
     @GetMapping("/examples")
