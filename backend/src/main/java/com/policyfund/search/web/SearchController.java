@@ -1,5 +1,6 @@
 package com.policyfund.search.web;
 
+import com.policyfund.common.error.ResourceNotFoundException;
 import com.policyfund.search.dto.SearchExample;
 import com.policyfund.search.dto.SearchHistoryItem;
 import com.policyfund.search.dto.SearchRequest;
@@ -43,6 +44,25 @@ public class SearchController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return service.history(page, Math.min(size, 100));
+    }
+
+    @GetMapping("/history/{sessionId}")
+    public SearchHistoryItem historyItem(@PathVariable String sessionId) {
+        return service.bySession(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "HISTORY_NOT_FOUND", "검색 기록을 찾을 수 없습니다."));
+    }
+
+    @DeleteMapping("/history/{sessionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteHistory(@PathVariable String sessionId) {
+        service.deleteHistory(sessionId);
+    }
+
+    @DeleteMapping("/history")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void clearHistory() {
+        service.clearHistory();
     }
 
     public record AddExampleRequest(@NotBlank String text) {}

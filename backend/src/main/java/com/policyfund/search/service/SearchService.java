@@ -18,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class SearchService {
@@ -68,7 +70,8 @@ public class SearchService {
             }
         }
         SearchResult result = synthesizer.synthesize(query, plan, candidates);
-        history.save(new SearchHistoryEntity(query, result.answer(), result, Instant.now()));
+        history.save(new SearchHistoryEntity(
+                UUID.randomUUID().toString(), query, result.answer(), result, Instant.now()));
         return result;
     }
 
@@ -81,8 +84,30 @@ public class SearchService {
     @Transactional(readOnly = true)
     public List<SearchHistoryItem> history(int page, int size) {
         return history.findAllByOrderByCreatedAtDesc(PageRequest.of(page, size)).stream()
-                .map(h -> new SearchHistoryItem(
-                        String.valueOf(h.getId()), h.getQuery(), h.getCreatedAt(), h.getResultJson()))
+                .map(SearchService::toItem)
                 .toList();
+    }
+
+    /** 세션 id(UUID)로 단건 조회. */
+    @Transactional(readOnly = true)
+    public Optional<SearchHistoryItem> bySession(String sessionId) {
+        return history.findBySessionId(sessionId).map(SearchService::toItem);
+    }
+
+    /** 세션 id(UUID) 1건 삭제. 미존재 sessionId 는 조용히 무시(멱등 204). */
+    @Transactional
+    public void deleteHistory(String sessionId) {
+        history.findBySessionId(sessionId).ifPresent(history::delete);
+    }
+
+    /** 검색 기록 전체 삭제(단일 DELETE). */
+    @Transactional
+    public void clearHistory() {
+        history.deleteAllInBatch();
+    }
+
+    private static SearchHistoryItem toItem(SearchHistoryEntity h) {
+        return new SearchHistoryItem(
+                String.valueOf(h.getId()), h.getSessionId(), h.getQuery(), h.getCreatedAt(), h.getResultJson());
     }
 }

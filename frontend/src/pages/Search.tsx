@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { SEARCH_SCENARIOS } from '../data/mock'
 import type { SearchResult } from '../api/types'
 import { searchPolicy } from '../api/search'
 import { ApiError } from '../api/client'
+import { useSearchHistory } from '../context/SearchHistoryContext'
 import {
   ArticleCard,
   Card,
@@ -13,15 +15,13 @@ import {
 
 const MAX_EXAMPLES = 5
 
-interface HistoryEntry {
-  query: string
-  result: SearchResult
-}
-
 export default function Search() {
+  const { sessionId } = useParams()
+  const navigate = useNavigate()
+  const { getBySessionId, fetchSession, refresh } = useSearchHistory()
+
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<SearchResult | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,25 +31,70 @@ export default function Search() {
   )
   const [newExample, setNewExample] = useState('')
 
-  // 백엔드 /api/v1/search 를 호출해 실제 검색 결과를 받아온다.
-  async function runSearch(q: string) {
-    const trimmed = q.trim()
-    if (!trimmed || loading) return
-    setQuery(trimmed)
+  // 검색 중복 실행 가드(연타 대비; loading state 의존 없이 안정 동작).
+  const busyRef = useRef(false)
+
+  // URL(/q/<sessionId>) 변경 시 그 세션을 복원한다. 적재된 목록에 있으면 즉시, 없으면(딥링크/새로고침)
+  // 백엔드 단건 조회로 가져온다. sessionId 가 없으면(홈 '/') 새 대화로 초기화한다.
+  useEffect(() => {
+    if (!sessionId) {
+      setResult(null)
+      setQuery('')
+      setError(null)
+      return
+    }
+    const cached = getBySessionId(sessionId)
+    if (cached) {
+      setQuery(cached.query)
+      setResult(cached)
+      setError(null)
+      return
+    }
+    let ignore = false
     setLoading(true)
     setError(null)
+    fetchSession(sessionId)
+      .then((item) => {
+        if (ignore) return
+        if (item?.result) {
+          setQuery(item.query)
+          setResult(item.result)
+        } else {
+          setResult(null)
+          setQuery('')
+          setError('해당 대화를 찾을 수 없습니다.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+    // sessionId 변경에만 반응한다(getBySessionId/fetchSession 은 변경 시점의 최신 클로저 사용).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
+
+  // 새 검색: 백엔드 질의 → 기록 갱신 → 생성된 세션(/q/<sessionId>)으로 이동(딥링크·공유 가능).
+  async function submit(q: string) {
+    const trimmed = q.trim()
+    if (!trimmed || busyRef.current) return
+    busyRef.current = true
+    setLoading(true)
+    setError(null)
+    setQuery(trimmed)
     try {
       const r = await searchPolicy(trimmed)
       setResult(r)
-      setHistory((prev) => [
-        { query: trimmed, result: r },
-        ...prev.filter((h) => h.query !== trimmed),
-      ])
+      const fresh = await refresh() // 사이드바 채팅 기록 갱신 + 신규 sessionId 획득
+      const newest = fresh && fresh[0]
+      if (newest?.sessionId) navigate(`/q/${encodeURIComponent(newest.sessionId)}`)
     } catch (e) {
       setResult(null)
       setError(e instanceof ApiError ? e.message : '검색 중 오류가 발생했습니다.')
     } finally {
       setLoading(false)
+      busyRef.current = false
     }
   }
 
@@ -76,13 +121,13 @@ export default function Search() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && runSearch(query)}
+            onKeyDown={(e) => e.key === 'Enter' && submit(query)}
             placeholder="예: 서류 제출 기한이 어떻게 되나요?"
             autoFocus
             className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-slate-900"
           />
           <button
-            onClick={() => runSearch(query)}
+            onClick={() => submit(query)}
             disabled={loading}
             className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
           >
@@ -104,7 +149,7 @@ export default function Search() {
                 key={q}
                 className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white py-0.5 pl-2.5 pr-1 text-xs text-slate-600"
               >
-                <button onClick={() => runSearch(q)} className="hover:text-slate-900">
+                <button onClick={() => submit(q)} className="hover:text-slate-900">
                   {q}
                 </button>
                 <button
@@ -146,27 +191,6 @@ export default function Search() {
       )}
 
       {result && <ResultView result={result} />}
-
-      {history.length > 0 && (
-        <div className="mt-8">
-          <SectionLabel>검색 기록 (자동 저장)</SectionLabel>
-          <div className="mt-2 space-y-1">
-            {history.map((h) => (
-              <button
-                key={h.query}
-                onClick={() => runSearch(h.query)}
-                className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition hover:bg-slate-50 ${
-                  result === h.result ? 'border-slate-900 bg-slate-50' : 'border-slate-200'
-                }`}
-              >
-                <span className="text-slate-400">🔍</span>
-                <span className="flex-1 text-slate-700">{h.query}</span>
-                <span className="text-xs text-slate-400">다시 보기</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -200,7 +224,7 @@ function ResultView({ result }: { result: SearchResult }) {
             <p key={i}>{line}</p>
           ))}
         </div>
-        {result.evidence.length > 0 && (
+        {result.evidence && result.evidence.length > 0 && (
           <div className="mt-3">
             <SectionLabel>근거 조항</SectionLabel>
             <div className="space-y-2">
@@ -212,8 +236,9 @@ function ResultView({ result }: { result: SearchResult }) {
         )}
       </Card>
 
-      {/* 중복 절차: 요약 1건 + 출처 */}
-      {result.duplicateSummary && (
+      {/* 중복 절차: 요약 1건 + 출처. summary/sources 가 null 일 수 있어 방어적으로 가드한다. */}
+      {result.duplicateSummary &&
+        (result.duplicateSummary.summary || (result.duplicateSummary.sources?.length ?? 0) > 0) && (
         <Card className="border-l-4 border-l-emerald-400">
           <div className="mb-2 flex items-center gap-2">
             <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
@@ -221,11 +246,13 @@ function ResultView({ result }: { result: SearchResult }) {
             </span>
             <span className="text-xs text-slate-400">동일 내용은 하나로 요약</span>
           </div>
-          <p className="mb-3 text-sm leading-relaxed text-slate-800">
-            {result.duplicateSummary.summary}
-          </p>
+          {result.duplicateSummary.summary && (
+            <p className="mb-3 text-sm leading-relaxed text-slate-800">
+              {result.duplicateSummary.summary}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
-            {result.duplicateSummary.sources.map((a, i) => (
+            {(result.duplicateSummary.sources ?? []).map((a, i) => (
               <SourceChip key={i} article={a} />
             ))}
           </div>
