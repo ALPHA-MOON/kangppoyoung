@@ -38,6 +38,22 @@ class CandidateMergeTest {
     }
 
     @Test
+    void interleave_recoversSecondOnlyChunkWithinTightCap() {
+        List<Article> first = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            first.add(art("dA", "S", "a" + i)); // 분석기 확장 질의: 한 섹션 다수
+        }
+        List<Article> second = List.of(art("dKey", "K", "key")); // 원 질의에만 있는 핵심 청크
+
+        // 2:1 우대 + 총 4 한도. first-우선 병합이면 key 가 잘리지만, 교차는 상단에 둬 회수한다.
+        List<Article> merged = CandidateMerge.interleave(first, second, 2, 10, 4);
+
+        assertThat(merged).hasSize(4);
+        assertThat(merged).anyMatch(a -> "dKey".equals(a.docId()));               // 한쪽에만 있어도 회수
+        assertThat(merged.stream().filter(a -> "dA".equals(a.docId())).count()).isEqualTo(3); // 2:1 우대
+    }
+
+    @Test
     void capBySection_respectsTotalCap() {
         List<Article> articles = new ArrayList<>();
         for (int i = 0; i < 50; i++) {

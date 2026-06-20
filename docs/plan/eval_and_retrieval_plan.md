@@ -48,5 +48,9 @@
 1. (완료) Phase A 하니스 + 10회 → 신뢰 baseline **70.7**.
 2. (완료·되돌림) Phase B-1 결정론화(temp 0) → 평균 69.5(−1.2), Q4 미해결·Q8 회귀로 되돌림.
    기록: [`../eval/results-2026-06-20-temp0-experiment.md`](../eval/results-2026-06-20-temp0-experiment.md).
-3. (다음) **Q4 retrieval recall**(표지·목차 강등 + 원 질의 안정 회수 병합) — 온도 아닌 랭킹/회수 개선.
-4. (다음) **Q8 synth prompt**(예/아니오형도 근거 설명 강제) — retrieval 외 합성 보강.
+3. (완료) **Q4 retrieval recall** — 원 질의·분석기 질의 **가중 교차 병합(2:1)**. 평균 70.7→**72.1**,
+   Q4 "근거 없음" 3/10→1/10, Q6·Q5·Q2 recall 상승.
+   기록: [`../eval/results-2026-06-20-retrieval.md`](../eval/results-2026-06-20-retrieval.md).
+4. (완료·부분) **Q8 synth prompt**(예/아니오형 근거 설명) — 품목표가 회수될 땐 풀어 답하나, 품목표
+   청크 자체가 회수 안 돼 8/10 단답. 33→36.
+5. (다음) **Q8 품목표 회수** — 참고자료 table-row(품목표) 청크의 임베딩/검색 개선(별도 과제).
