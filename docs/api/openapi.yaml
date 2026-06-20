@@ -281,6 +281,50 @@ paths:
                     items:
                       $ref: '#/components/schemas/ContentBlock'
 
+  /notices/assets/{id}:
+    get:
+      tags: [notices]
+      operationId: getNoticeAsset
+      summary: 전처리에서 추출된 이미지 블록을 콘텐츠 주소(sha256)로 서빙
+      description: >-
+        전처리(preprocessNoticePdf) 단계에서 추출된 이미지 자산을 sha256 콘텐츠 주소로
+        서빙한다. ContentBlock(type:image)의 src 필드는 `/api/v1/notices/assets/{id}` 형태를
+        가리킨다. 동일 이미지는 동일 id(콘텐츠 주소)를 가지므로 버전 간 diff에서 이미지 동등성
+        비교에 활용된다. 응답은 캐시 가능한 정적 PNG 바이너리다. (UC-3 / FR-3.x)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: >-
+            sha256 콘텐츠 주소 (64자 소문자 16진수). 정규식: `^[0-9a-f]{64}$`.
+            패턴 불일치 또는 미존재 모두 404(ASSET_NOT_FOUND)를 반환한다.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+            minLength: 64
+            maxLength: 64
+          example: a3f1c2d4e5b6a7f8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+      responses:
+        '200':
+          description: PNG 이미지 바이너리 (캐시 가능)
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 자산을 찾을 수 없음 (id 패턴 불일치 또는 미존재)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  summary: 미존재 또는 패턴 불일치
+                  value:
+                    code: ASSET_NOT_FOUND
+                    message: '자산을 찾을 수 없습니다: <id>'
+
   # ─────────────────────── 자주 묻는 질문 분석 · 랭킹 ───────────────────────
   /rankings:
     get:
