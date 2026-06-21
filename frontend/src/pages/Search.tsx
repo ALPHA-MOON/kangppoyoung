@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { SEARCH_SCENARIOS } from '../data/mock'
 import type { SearchResult } from '../api/types'
 import { searchPolicy } from '../api/search'
 import { ApiError } from '../api/client'
@@ -15,6 +14,31 @@ import {
 
 const MAX_EXAMPLES = 5
 
+// 예시 질문은 브라우저(localStorage)에 저장해 페이지 이동·새로고침 후에도 유지한다.
+const EXAMPLES_STORAGE_KEY = 'search:examples'
+
+// 검색 평가에서 답변이 안정적으로 잘 나오는 질문 3개(eval_set 상위)를 기본 예시로 둔다.
+const DEFAULT_EXAMPLES = [
+  '2026년 중소기업 정책자금은 어떤 목적을 가지고 있으며, 어떤 기업을 주요 지원대상으로 보는가?',
+  '정책자금 융자는 신청부터 사후관리까지 어떤 순서로 진행되는가?',
+  '업력 7년 미만 기업과 7년 이상 기업은 정책자금 신청 시 어떤 자금이 기본적으로 연결되는가?',
+]
+
+function loadExamples(): string[] {
+  try {
+    const raw = localStorage.getItem(EXAMPLES_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.every((q) => typeof q === 'string')) {
+        return parsed.slice(0, MAX_EXAMPLES)
+      }
+    }
+  } catch {
+    // 파싱 불가/저장소 사용 불가 환경은 기본값으로 폴백
+  }
+  return DEFAULT_EXAMPLES
+}
+
 export default function Search() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -25,11 +49,18 @@ export default function Search() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 예시 질문 (사용자가 최대 5개까지 추가/삭제)
-  const [examples, setExamples] = useState<string[]>(
-    SEARCH_SCENARIOS.map((s) => s.query).slice(0, 3),
-  )
+  // 예시 질문 (사용자가 최대 5개까지 추가/삭제) — localStorage 에 영속(페이지 이동·새로고침 유지)
+  const [examples, setExamples] = useState<string[]>(loadExamples)
   const [newExample, setNewExample] = useState('')
+
+  // 예시 목록이 바뀌면 localStorage 에 저장한다(추가/삭제 모두 유지).
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXAMPLES_STORAGE_KEY, JSON.stringify(examples))
+    } catch {
+      // 저장 불가 환경은 무시(현 세션에만 유지)
+    }
+  }, [examples])
 
   // 검색 중복 실행 가드(연타 대비; loading state 의존 없이 안정 동작).
   const busyRef = useRef(false)
