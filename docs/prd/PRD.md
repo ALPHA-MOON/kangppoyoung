@@ -16,7 +16,7 @@
 
 모노레포 4파트: Python 파이프라인 · Spring Boot(Java 21, 패키지 `com.policyfund`) 백엔드 · React+Vite 프론트엔드 · Docker/nginx 인프라.
 
-핵심 데이터 흐름: **`source/`(PDF) → `pipeline/`(변환) → `out/`(chunks.xml 정본 + chunks.jsonl 적재용) → 백엔드 부팅 시 `chunk_embedding` 적재 → 검색·답변 합성**.
+핵심 데이터 흐름: **`source/`(PDF) → `pipeline/`(변환) → `out/`(chunks.xml 정본 + chunks.jsonl 적재용) → 백엔드 부팅 시 `chunk_embedding` 적재 → 검색·답변 합성**. **UC-3 개정본 등록 시에는 등록된 원본 PDF 를 백엔드가 번들 파이프라인으로 즉시 재청킹·재임베딩해 해당 카테고리 검색 인덱스를 '최신본'으로 자동 교체한다**(검색 RAG ↔ 공고 버전관리 동기화 — §UC-3 핵심 규칙).
 
 ### 1.2 문제정의
 - **문서가 흩어져 있다** → 규정·지침·절차를 하나씩 찾는 데 시간이 소모된다.
@@ -162,10 +162,17 @@
 | FR-3.7 | 버전 diff `GET /notices/{category}/versions/{version}/diff` — **바로 전(더 오래된) 버전 대비 LCS 블록 비교**(서버 계산, 저장 안 함). | 백엔드 `[구현됨]`, 프론트 `[구현됨]` |
 | FR-3.8 | diff 표기 = 추가 emerald(+), 삭제 rose(−·취소선), 동일 무색(텍스트·이미지 블록 모두). | 프론트 `[구현됨]` |
 | FR-3.9 | 자산 서빙 `GET /api/v1/notices/assets/{id}` — sha256 64-hex 콘텐츠 주소, `image/png` 고정. 신규 업로드 `POST /api/v1/notices/assets`(검토 단계 수동 추가 이미지를 콘텐츠 주소 자산으로 적재). | 백엔드 `[구현됨]`(계약 반영됨) |
+| FR-3.10 | **개정본 등록 성공 시 검색 RAG 자동 재색인** — 전처리에서 보관한 원본 PDF(`sourceRef`)를 백엔드가 비동기로 번들 파이프라인에 돌려 청크·임베딩을 생성하고, `chunk_embedding`에서 해당 `category` 청크를 통째 교체(`deleteByCategory`+insert)해 검색이 최신 원문을 답하게 한다. 이전엔 검색=`out/` 부팅 적재만이라 개정해도 검색은 옛 원문을 답하던 단절을 해소. | 백엔드 `[구현됨]` |
 
 **UC-3 핵심 규칙(전부 보존):**
 - **승인 게이트:** 전처리(그림·도표→텍스트)는 자동이지만 **등록을 확정하지 않는다** — 반드시 검토·승인 후 `effectiveDate` 입력을 거쳐 `revisions`로 등록(자동 확정 금지).
 - **단일 진실 문서:** 동일 문서는 **새 버전으로만 누적·갱신**(기존 버전 불변). 검색 결과는 항상 최신.
+- **검색 RAG ↔ 공고 버전관리 동기화(자동 재색인):** 개정본 등록이 성공하면 검색 인덱스가 자동으로 최신본으로 따라온다. 흐름 = 전처리(`preprocess`)가 업로드된 원본 PDF 를 보관하고 `sourceRef`를 반환 → 등록 요청(`POST .../revisions`)에 `sourceRef`를 동봉 → 등록 성공 후 `NoticeService`가 `RagReindexService.reindex(category, pdf)`를 호출 → 비동기로 번들 python 파이프라인을 원본 PDF 에 실행해 청크 jsonl 생성 → 임베딩 계산(트랜잭션 밖) → `chunk_embedding`에서 해당 `category` 청크를 **통째 교체**(짧은 트랜잭션의 `deleteByCategory`+`saveAll`). `sourceRef`가 없으면 재색인을 건너뛴다.
+- **인덱스 정책 — 카테고리별 '최신본'만 유지:** 검색 인덱스는 구버전 혼용을 막기 위해 카테고리별 최신본 청크만 보유한다(교체 시 이전 버전 청크 삭제). 과거 버전은 `notice_version`에 그대로 보존되어 diff·이력에는 쓰이지만 **검색에는 노출되지 않는다**. `chunk_embedding.category` 컬럼(마이그레이션 V8)으로 카테고리 단위 교체를 구동하며, `category=NULL`은 공고와 무관한 청크(`out/` 검색 부트스트랩 적재분).
+- **재색인은 비동기·best-effort:** `@Async("reindexExecutor")`로 등록 응답을 막지 않으며, 실패해도 로깅만 하고 **등록·공고 버전에는 영향이 없다**(검색만 이전 상태 유지). `notices.reindex.enabled=false`로 비활성 가능.
+- **최초 부팅 부트스트랩:** `NoticeBootstrapLoader`(`@Order(2)`, `DevDataLoader` 이후 실행)가 원본 공고 PDF(`source/1`=공고, `source/2`=참고자료)를 각 카테고리 **v1 으로 시드·색인**한다(카테고리에 버전이 없을 때만 1회). 실제 등록 경로(preprocess → registerRevision → reindex)를 그대로 타므로 v1 도 검색 재색인까지 이어진다. docker 컨테이너에 `source/` 마운트 + 파이프라인 번들로 동작.
+- **알려진 트레이드오프(재색인은 '원본 PDF' 기준):** 검토 단계에서 사용자가 블록을 편집(추가/삭제/수정)한 내용은 공고 화면(`notice_version.blocks`)에는 반영되지만, **검색 인덱스에는 반영되지 않는다**(재색인은 원본 PDF 청크 기준). 검토 편집과 검색 인덱스의 정합 방식은 향후 결정 필요(§12 오픈 퀘스천).
+- **운영 유의(비용):** 재색인이 OpenAI 임베딩 모드면 **개정 1회당 임베딩 비용이 발생**한다(hash 오프라인 모드는 무료). 파이프라인 청킹 자체는 오프라인·결정론.
 - **개정본은 항상 새 최신본으로만 등록(백데이트 금지):** `effectiveDate`가 현재 최신본 시행일보다 과거면 백엔드 `registerRevision`이 400 `INVALID_EFFECTIVE_DATE`. 프론트도 입력 `min`/검증으로 과거 시행일을 차단.
 - 버전 목록/드랍박스는 **(시행일, 버전번호[숫자]) 기준 내림차순(최신 우선)**. 정렬은 백엔드에서 `getNotice`/diff가 공유하는 단일 비교자로 일원화해 표시·diff 기준이 일치한다. version 자동 채번 = `max(parseVersionNumber)+1`, 접두 `'v'`, 비표준 버전 문자열은 0으로 간주.
 - **diff는 저장하지 않고** 두 버전 blocks로 요청 시 **LCS 블록 비교(서버 계산)** — 텍스트·이미지 블록 모두. diff는 내부에서 **date ASC·parseVersionNumber ASC로 재정렬**해 '바로 전(더 오래된)' 버전을 비교 기준으로 집는다(openapi의 date DESC 응답 정렬과 별개). 첫 버전은 previous=빈 → 전부 add. 동등성: TextBlock=text, ImageBlock=src+name(이미지 동등성은 sha256 src로 판정).
@@ -240,7 +247,7 @@
 
 | 엔티티/테이블 | 키·제약 | 주요 컬럼 | 비고 |
 | --- | --- | --- | --- |
-| `chunk_embedding` | **PK `chunk_id`** | document_id, article_no, seq_no(0-base reading order), heading_path, page_no, embedding_text, vector(JSON 직렬화) | upsert 멱등. VECTOR 타입 미사용, 인메모리 코사인. UC-1·INFRA 소스. |
+| `chunk_embedding` | **PK `chunk_id`** | document_id, article_no, seq_no(0-base reading order), heading_path, page_no, embedding_text, vector(JSON 직렬화), **category**(V8, NULL=공고 무관·부트스트랩분) | upsert 멱등. VECTOR 타입 미사용, 인메모리 코사인. UC-1·INFRA 소스. **`category` 단위로 개정본 등록 시 최신본 통째 교체(deleteByCategory+insert).** |
 | `search_history` | **`sessionId`(UUIDv4, length 36, unique)**, DB id(Long) | query, answer, **result_json**(`SqlTypes.JSON`), created_at | `createdAt DESC` 정렬, user 컬럼 없음(전사 공용). 랭킹/온보딩 소스. |
 | `search_example` | **`slot` unique(최대 5)**, id(Long) | text, slot | 5개 제약 서비스 트랜잭션(FOR UPDATE) + DB 트리거 이중 방어(C-3). |
 | `notice_category` | **PK `key`(regulation/reference)** | label, doc_title, **doc_type**(V7, regulation→'공고'/reference→'참고자료') | 공고/참고자료 메타. 배지는 `docType`으로 표시. |
@@ -483,7 +490,7 @@ chunks.jsonl: 한 줄 = {chunk_id, content_type, embedding_text, metadata}
 | **A** Pipeline 결정론 갭(신규 의존성 없음) | A1 relations parent_chunk_id linkage | **DONE**(pytest 37) |
 | | A2 이종 청크 양방향 related / A3 tables section 상속 / A4 분할표 논리 병합 / A5 config §19 확장 / A6 max_chunks·max_serialized_mb 가드 + exit 5/4 | 대기 |
 | **B** Provider 추상화(offline-first) | B1 Vision/OcrProvider + OfflineProvider + 캐시 / B2 figures→infographic 설명 | 대기 |
-| **C** Vector DB ingest + 백엔드 검색 | C1 embedding provider / C2 chunk_embedding Flyway + ingest(jsonl→DB) / C3 VectorRetrievalPort+adapter(cosine) / C4 pipeline→backend bridge(ProcessBuilder, manifest.json 권위) | **C1~C3 사실상 완료**(INFRA·UC-1 `[구현됨]`이 stale 체크박스 대체). **C4 ProcessBuilder 브리지는 미구현** — 현재는 부팅 시 `out/**/chunks.jsonl` 적재로 동작(런타임 PDF→파이프라인 호출 아님). |
+| **C** Vector DB ingest + 백엔드 검색 | C1 embedding provider / C2 chunk_embedding Flyway + ingest(jsonl→DB) / C3 VectorRetrievalPort+adapter(cosine) / C4 pipeline→backend bridge(ProcessBuilder, manifest.json 권위) | **C1~C3 사실상 완료**(INFRA·UC-1 `[구현됨]`이 stale 체크박스 대체). **C4 런타임 pipeline 브리지 = UC-3 개정본 등록 경로에 도입됨**(`RagReindexService`가 등록된 원본 PDF 를 번들 파이프라인에 비동기 실행 → `chunk_embedding` 카테고리 교체, 검색 RAG↔공고 버전 동기화). 부팅 콜드스타트는 여전히 `out/**/chunks.jsonl` 적재. |
 | **D** Frontend 통합 + E2E | D1 검색 UI↔`/api/v1/search` / D2 E2E / D3 전체 테스트 green | **D1 진행**(검색·채팅 기록·UC-3 공고/개정본 등록 UI 연동 `[구현됨]`). 나머지 페이지(UC-1-2 예시·UC-4·UC-5) 미연동, E2E·전체 green 대기. |
 
 > 테스트 베이스라인: pipeline pytest 35 passed(2026-06-18 기준), A1 완료 후 37 passed(베이스라인 불일치는 §12 open question).
@@ -508,6 +515,7 @@ P1 기반(스캐폴딩·Compose·Flyway·전역에러·보안기반) → P2 noti
 - **유사 질문 카테고리화 기준** — 유사도 임계값·분류 체계 안정화. 현재 부분문자열 빈도 매칭의 과대·과소 집계 가능.
 - **랭킹 `trend`·`viewCount` 의미** — 증감 추세(up/down/same)·조회수 별도 집계 구현 여부(현재 trend='same', searchCount==viewCount).
 - **랭킹 캐시(`ranking_cache`) 갱신 주기** — 온디맨드 vs 배치.
+- **검토 편집 ↔ 검색 인덱스 정합(미해결):** 개정본 재색인은 **원본 PDF 청크 기준**이므로, 검토 단계에서 사용자가 블록을 편집(추가/삭제/수정)한 내용은 공고 화면(`notice_version.blocks`)에는 반영되지만 검색 인덱스에는 반영되지 않는다. 향후 ① 편집 후 blocks 를 검색 청크 소스로 채택할지, ② 원본 PDF 기준을 유지하고 편집은 표시 전용으로 둘지 결정 필요.
 - **전처리 입력 포맷 범위**(PDF/이미지/한글 문서)와 **표·도표 표현 포맷**(이미지 블록 vs 구조화 텍스트). 실제 preprocess는 PDFBox 텍스트 추출 + 이미지 전용 페이지 Vision OCR이며 '표·도표 인식' 독립 단계는 코드에 없음(전처리 결과 블록을 프론트 검토 화면이 그대로 표시).
 - **preprocess 한도 정본** — 50MB가 servlet multipart와 `app.preprocess.max-bytes` 두 곳 중복, 페이지 수 상한·8000자 컷 실제 적용 여부.
 - ~~**참고자료(reference) 배지 의미**~~ — **해결됨**: `notice_category.doc_type`(V7)·`NoticeCategory.docType`으로 배지를 표시(regulation→'공고', reference→'참고자료'). 기존 `category!=='regulation'`을 '절차'로 표기하던 어긋남 제거(UC-3 핵심 규칙).

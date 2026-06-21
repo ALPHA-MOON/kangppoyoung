@@ -294,6 +294,13 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/ContentBlock'
+                  sourceRef:
+                    type: string
+                    description: >-
+                      원본 PDF 의 콘텐츠 주소(sha256). 개정본 등록 요청(NoticeRevisionRequest)에
+                      그대로 실어 보내면 등록 후 해당 카테고리 검색 인덱스를 원본 PDF 기준
+                      최신본으로 재색인한다(비동기).
+                      (backend: PreprocessResponse.sourceRef)
         '400':
           description: 잘못된 파일 (PDF 아님 / 빈 파일 / 50 MB 초과)
           content:
@@ -651,6 +658,12 @@ components:
           minItems: 1
           description: 갱신본 블록 목록. 빈 배열은 허용하지 않는다(@NotEmpty).
           items: { $ref: '#/components/schemas/ContentBlock' }
+        sourceRef:
+          type: string
+          description: >-
+            전처리 응답(PreprocessResponse)의 sourceRef. 있으면 등록 후 해당 카테고리
+            검색 인덱스를 원본 PDF 기준 최신본으로 재색인한다(비동기). 선택값(@NotNull 아님).
+            (backend: NoticeRevisionRequest.sourceRef)
 
     DiffBlock:
       type: object

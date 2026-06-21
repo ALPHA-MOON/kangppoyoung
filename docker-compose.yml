@@ -32,6 +32,8 @@ services:
       - ./out:/app/out:ro
       # 원본 공고 PDF — 최초 부팅 시 각 카테고리 v1 시드 + 재색인 입력(notices.bootstrap).
       - ./source:/app/source:ro
+      # 등록 재색인 입력용 원본 PDF 보관소(전처리→등록 사이 컨테이너 재생성에도 유지).
+      - notice-src:/app/data/notice-src
 
   frontend:
     # Vite 정적 빌드를 자체 nginx 로 서빙(SPA 폴백). 엣지 nginx 가 / 를 이 서비스로 프록시.
@@ -52,3 +54,4 @@ services:
 
 volumes:
   mysql-data:
+  notice-src:

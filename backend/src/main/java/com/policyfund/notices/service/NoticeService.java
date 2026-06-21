@@ -13,6 +13,8 @@ import com.policyfund.notices.dto.NoticeRevisionRequest;
 import com.policyfund.notices.dto.NoticeVersionDto;
 import com.policyfund.notices.rag.NoticeSourceStorage;
 import com.policyfund.notices.rag.RagReindexService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,8 @@ import java.util.List;
 
 @Service
 public class NoticeService {
+
+    private static final Logger log = LoggerFactory.getLogger(NoticeService.class);
 
     private final NoticeCategoryRepository categories;
     private final NoticeVersionRepository versions;
@@ -59,7 +63,7 @@ public class NoticeService {
 
     @org.springframework.transaction.annotation.Transactional
     public NoticeVersionDto registerRevision(String category, NoticeRevisionRequest request) {
-        categories.findById(category)
+        NoticeCategoryEntity cat = categories.findById(category)
                 .orElseThrow(() -> new ResourceNotFoundException("NOTICE_CATEGORY_NOT_FOUND",
                         "공고 카테고리를 찾을 수 없습니다: " + category));
 
@@ -86,10 +90,20 @@ public class NoticeService {
                 category, "v" + next, request.effectiveDate(), request.blocks()));
 
         // 새 최신본 등록 → 해당 카테고리 검색 인덱스를 원본 PDF 기준으로 비동기 재색인(최신본만 유지).
-        // sourceRef 가 없으면(원본 PDF 미보관) 재색인을 건너뛴다. 재색인 실패는 등록에 영향 없음.
+        // 검색 출처 표기는 카테고리 정식 문서명(docTitle)을 쓴다. 재색인 트리거(큐 포화 등) 실패가
+        // 등록을 깨지 않도록 방어한다. sourceRef 없거나 원본 PDF 유실 시 건너뛰되 흔적을 남긴다.
         if (request.sourceRef() != null && !request.sourceRef().isBlank()) {
-            sourceStorage.load(request.sourceRef())
-                    .ifPresent(pdf -> reindexService.reindex(category, pdf));
+            var pdf = sourceStorage.load(request.sourceRef());
+            if (pdf.isPresent()) {
+                try {
+                    reindexService.reindex(category, cat.getDocTitle(), pdf.get());
+                } catch (Exception e) {
+                    log.warn("RAG 재색인 트리거 실패 — category={} (등록은 정상 처리됨)", category, e);
+                }
+            } else {
+                log.warn("RAG 재색인 건너뜀 — sourceRef={} 의 원본 PDF 없음(컨테이너 재생성/보관 유실 가능)",
+                        request.sourceRef());
+            }
         }
 
         return toDto(saved);

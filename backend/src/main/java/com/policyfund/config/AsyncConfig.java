@@ -1,5 +1,6 @@
 package com.policyfund.config;
 
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -19,6 +20,10 @@ public class AsyncConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("reindex-");
+        // 큐 포화 시 제출 예외가 등록 스레드로 전파되지 않도록 폐기+로깅(검색은 다음 등록 시 갱신).
+        executor.setRejectedExecutionHandler((r, exec) ->
+                LoggerFactory.getLogger(AsyncConfig.class)
+                        .warn("RAG 재색인 큐 포화 — 작업 폐기(검색은 다음 등록 시 갱신됨)"));
         executor.initialize();
         return executor;
     }

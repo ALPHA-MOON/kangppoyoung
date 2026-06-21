@@ -39,7 +39,7 @@ public class RagReindexService {
     }
 
     @Async("reindexExecutor")
-    public void reindex(String category, byte[] pdf) {
+    public void reindex(String category, String fileName, byte[] pdf) {
         if (!enabled) {
             log.debug("RAG 재색인 비활성(notices.reindex.enabled=false) — category={} 건너뜀", category);
             return;
@@ -54,9 +54,11 @@ public class RagReindexService {
         }
         Path jsonl = null;
         try {
-            jsonl = chunker.chunk(pdf);
+            jsonl = chunker.chunk(pdf, fileName);
             List<ChunkEmbeddingEntity> entities = ingestService.readEntities(jsonl, category);
-            ingestService.replaceCategory(category, entities);
+            // 한 PDF → 하나의 document_id(콘텐츠 해시). out/ 콜드스타트로 적재된 같은 원본의 중복분을 함께 정리.
+            String documentId = entities.isEmpty() ? null : entities.get(0).getDocumentId();
+            ingestService.replaceCategory(category, documentId, entities);
             log.info("RAG 재색인 완료 — category={}, chunks={}", category, entities.size());
         } catch (Exception e) {
             log.error("RAG 재색인 실패 — category={} (등록은 정상, 검색만 이전 상태 유지)", category, e);

@@ -93,11 +93,16 @@ public class ChunkIngestService {
 
     /**
      * 카테고리 단위 '최신본' 교체: 해당 카테고리의 기존 청크를 모두 지우고 새 청크로 대체한다.
+     * 추가로 동일 원본(documentId=콘텐츠 해시)의 기존 청크도 지워, out/ 콜드스타트로 적재된
+     * 같은 문서의 category=NULL 중복분을 제거한다(검색 중복·구버전 잔존 방지).
      * 임베딩은 호출 전에 계산해 두고(readEntities), 이 메서드는 짧은 트랜잭션에서 삭제+삽입만 한다.
      */
     @Transactional
-    public void replaceCategory(String category, List<ChunkEmbeddingEntity> entities) {
+    public void replaceCategory(String category, String documentId, List<ChunkEmbeddingEntity> entities) {
         repository.deleteByCategory(category);
+        if (documentId != null && !documentId.isBlank()) {
+            repository.deleteByDocumentId(documentId);
+        }
         repository.saveAll(entities);
     }
 

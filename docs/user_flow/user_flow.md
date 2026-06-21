@@ -61,6 +61,10 @@
   `@ConditionalOnProperty(search.retrieval=vector)` 핀으로 **기본 비활성**. ChromaDB는 future.
 - **MySQL** — API에 필요한 핵심 데이터의 영구 저장소(`chunk_embedding`, `search_history`,
   `search_example`, `notice_category`/`notice_version`, `ranking_cache` 등).
+- **`RagReindexService`(검색 RAG↔공고 동기화)** — UC-3 개정본 등록 시 등록된 원본 PDF 를 비동기(`@Async`)로
+  번들 python 파이프라인에 돌려 청크·임베딩을 만들고 `chunk_embedding`에서 해당 `category` 청크를
+  통째 교체(`deleteByCategory`+insert)한다. best-effort(실패해도 등록·공고 버전엔 영향 없음).
+  부팅 시 `NoticeBootstrapLoader`가 원본 공고 PDF 를 각 카테고리 v1 로 시드하며 동일 경로를 탄다.
 
 > **검색 provider 핀:** `application.yml` `search.retrieval=vector`,
 > `embedding.provider`/`synth.provider`=`openai`(기본, `OPENAI_API_KEY` 필요). 키 없으면
@@ -307,15 +311,25 @@
         → ImageBlock(src='/api/v1/notices/assets/{id}') 추가
         ⇒ PageVisionExtractor.extractText(png)(OpenAiPageVisionExtractor → ChatClient gpt-4o vision, 한국어 평문)
         → 비어있지 않으면 TextBlock 추가
-   → 200 PreprocessResponse{blocks: ContentBlock[]} (등록 미확정)
+   → 업로드된 원본 PDF 를 NoticeSourceStorage.store(bytes) → sourceRef 발급(재색인 입력 보관)
+   → 200 PreprocessResponse{blocks: ContentBlock[], sourceRef} (등록 미확정)
 
-[개정본 등록] POST /notices/{category}/revisions {effectiveDate, blocks}  (registerNoticeRevision) @ResponseStatus(201)
+[개정본 등록] POST /notices/{category}/revisions {effectiveDate, blocks, sourceRef}  (registerNoticeRevision) @ResponseStatus(201)
    → 카테고리 존재 검증(없으면 404)
    → 시행일 검증: 현재 최신본 date 이후만 허용 — effectiveDate < max(existing.date)면
         BadRequestException('INVALID_EFFECTIVE_DATE')→400 (백데이트 금지)
    → 기존 vN 최댓값+1로 'v{next}' 자동 채번(없으면 v1)
    ▣ NoticeVersionEntity(category,'v'+next,effectiveDate,blocks) save → 201 NoticeVersionDto
         · 백데이트 금지 불변식 덕분에 등록 직후 새 버전이 항상 versions[0](최신본)
+   → sourceRef 있으면 NoticeSourceStorage.load(sourceRef)로 원본 PDF 복원 →
+        RagReindexService.reindex(category, pdf) 호출(비동기·best-effort, 응답 막지 않음)
+
+[검색 RAG 재색인] RagReindexService.reindex(category, pdf)  @Async("reindexExecutor")
+   → 번들 python 파이프라인 실행(원본 PDF→청크 jsonl)  ⇒ pipeline 서브프로세스
+   ⇒ ChunkIngestService.readEntities(jsonl, category)(임베딩 계산, 트랜잭션 밖)
+   ▣ ChunkIngestService.replaceCategory(category, entities) — 짧은 트랜잭션에서
+        chunk_embedding.deleteByCategory(category) 후 saveAll(최신본 청크 통째 교체)
+        · 검색 인덱스는 카테고리별 '최신본'만 유지(구버전 혼용 방지). 실패 시 로깅만(등록 영향 없음)
 
 [자산 업로드] POST /api/v1/notices/assets  (multipart: file, uploadNoticeAsset) @ResponseStatus(201)
    → 검토 단계에서 수동 추가하는 이미지를 콘텐츠 주소 자산으로 업로드(base64 data URL 아님)
@@ -338,6 +352,23 @@
 - **승인 게이트**: 전처리(그림·도표→텍스트)는 자동이지만 **등록을 확정하지 않는다** — 반드시 사용자
   검토·승인 후 시행일(`effectiveDate`) 입력을 거쳐 `revisions`로 등록(자동 확정 금지).
 - **단일 진실 문서**: 동일 문서는 **새 버전으로만 누적·갱신**(기존 버전 불변). 검색 결과는 항상 최신.
+- **검색 RAG ↔ 공고 버전관리 동기화(자동 재색인)**: 개정본 등록이 성공하면 검색 인덱스도 자동으로 최신본을
+  따라간다. 전처리가 원본 PDF 를 보관(`sourceRef`)하고 → 등록 요청에 동봉 → 등록 후 백엔드가 비동기로 번들
+  파이프라인을 원본 PDF 에 실행해 청크·임베딩 생성 → `chunk_embedding`에서 해당 `category` 청크를 통째 교체
+  (`deleteByCategory`+insert). **이전엔 검색=`out/` 부팅 적재만이라 개정해도 검색은 옛 원문을 답하던 단절을 해소.**
+- **인덱스 정책 — 카테고리별 '최신본'만 유지**: 검색 인덱스는 구버전 혼용을 막기 위해 카테고리별 최신본 청크만
+  보유한다. 과거 버전은 `notice_version`에 보존되어 diff·이력에는 쓰이지만 **검색에는 노출되지 않는다**.
+  `chunk_embedding.category` 컬럼(마이그레이션 V8)으로 카테고리 교체를 구동(`category=NULL`=공고 무관·부트스트랩분).
+- **재색인은 비동기·best-effort**: `@Async`로 등록 응답을 막지 않고, 실패해도 로깅만 한다(등록·공고 버전엔 영향
+  없음, 검색만 이전 상태 유지). `notices.reindex.enabled=false`로 비활성 가능.
+- **최초 부팅 부트스트랩**: `NoticeBootstrapLoader`(DevDataLoader 이후 실행)가 원본 공고 PDF(source/1=공고,
+  source/2=참고자료)를 각 카테고리 v1 로 시드·색인한다(카테고리에 버전이 없을 때만 1회). 실제 등록 경로
+  (preprocess→register→reindex)를 그대로 타며, docker 컨테이너에 `source/` 마운트 + 파이프라인 번들로 동작.
+- **알려진 트레이드오프(원본 PDF 기준 재색인)**: 검토 단계에서 사용자가 블록을 편집(추가/삭제/수정)한 내용은
+  공고 화면(`notice_version`)에는 반영되지만 **검색 인덱스에는 반영되지 않는다**(재색인은 원본 PDF 청크 기준).
+  검토 편집과 검색 인덱스의 정합 방식은 향후 결정 필요(§8 오픈 퀘스천).
+- **운영 유의(비용)**: 재색인이 OpenAI 임베딩 모드면 **개정 1회당 임베딩 비용 발생**(hash 오프라인은 무료).
+  파이프라인 청킹 자체는 오프라인·결정론.
 - 버전 드랍박스/목록은 **날짜 내림차순(최신 우선)**. version 자동 채번 = `max(parseVersionNumber)+1`,
   접두 `'v'`, 비표준 버전 문자열은 0으로 간주.
 - **diff는 저장하지 않고** 두 버전 blocks로 요청 시 **LCS 블록 비교(서버 계산)** — 텍스트·이미지 블록 모두.
@@ -469,8 +500,10 @@
 ```
 [원문 정책공고 PDF (규정/지침/절차)]
         │  pipeline/ 변환 (PDF→구조화→RAG 청크) + 부팅 시 임베딩 적재(INFRA)
+        │  + UC-3 개정본 등록 시 원본 PDF 재청킹·재임베딩(RagReindexService, 비동기)
         ▼
-[단일 진실 문서 저장소 + chunk_embedding(MySQL)]  ◄── UC-3 개정본 등록 시 이 문서만 새 버전 누적
+[단일 진실 문서 저장소 + chunk_embedding(MySQL)]  ◄── UC-3 개정본 등록 시 새 버전 누적
+        │                                              + 검색 인덱스를 카테고리 '최신본'으로 자동 교체(동기화)
         │
    nginx /api/v1/* ─► [Controller] ─► [Service] ─┬─────────────┬──────────────┐
         │                                         ▼             ▼              ▼
@@ -563,6 +596,10 @@
   (uploadNoticeAsset, 수동 추가 이미지 콘텐츠 주소 업로드) 모두 openapi.yaml 에 추가됨)**
 - UC-3 개정본 등록/버전 비교 프론트 연동 → **(해결됨: end-to-end 연동 완료, 커밋 afb50da. 전처리·등록·
   자산 업로드·diff 모두 서버 호출, 시행일 백데이트 금지(INVALID_EFFECTIVE_DATE), 서버가 정본)**
+- 검색 RAG ↔ 공고 버전관리 단절(개정해도 검색은 옛 원문 응답) → **(해결됨: 개정본 등록 시 등록된 원본 PDF 를
+  백엔드가 비동기로 번들 파이프라인에 돌려 `chunk_embedding`의 해당 category 청크를 통째 교체(deleteByCategory+
+  insert)해 검색 인덱스를 최신본으로 자동 동기화. 카테고리별 '최신본'만 유지(구버전 혼용 방지), `chunk_embedding.
+  category` 컬럼 V8 추가. 부팅 시 NoticeBootstrapLoader 가 원본 공고 PDF 를 v1 으로 시드·색인.)**
 
 **미해소 (계속 정의 필요):**
 - **인증·권한:** 담당자 로그인/접근 제어 범위. 1차 `permitAll()` 골격만, 추후 ROLE_ADMIN/ROLE_MANAGER
@@ -572,6 +609,10 @@
 - **공용 기록 전체삭제 (결정됨):** 누구나 전사 공용 기록을 일괄 삭제 가능(소유권·확인 검사 없음). →
   **현행 유지로 결정**(단일 운영자 가정). 차후 계정/RBAC 도입 시 권한별 접근으로 재설계한다.
 - **레이트리밋·PII 마스킹·OpenAI ZDR(Zero Data Retention)** 적용 시점·범위(현재 모두 미구현).
+- **검토 편집 ↔ 검색 인덱스 정합** — 개정본 재색인은 **원본 PDF 청크 기준**이라, 검토 단계에서 사용자가
+  편집한 블록은 공고 화면(`notice_version`)에는 반영되지만 검색 인덱스에는 반영되지 않는다. 향후 ① 편집된
+  blocks 를 검색 청크 소스로 채택할지, ② 원본 PDF 기준 유지(편집은 표시 전용)할지 결정 필요. 또한 재색인이
+  OpenAI 임베딩 모드면 개정 1회당 임베딩 비용이 발생한다(hash 오프라인은 무료).
 - **상충 절차 판단 기준 및 표시 UI 상세** — 어떤 조건을 '상충'으로 판정해 병렬 표시할지.
 - **유사 질문 카테고리화 기준** — 유사도 임계값·분류 체계 안정화. 현재 부분문자열 빈도 매칭의 정확도
   요구사항(짧은 카테고리/예시의 과대·과소 집계 가능).

@@ -13,8 +13,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 개정본 재색인의 핵심: 카테고리 '최신본'만 유지(이전 버전 청크 교체). hash 임베딩으로 Docker MySQL 에 적재.
- * (전체 pipeline 서브프로세스는 python 의존이라 여기선 chunks.jsonl 을 직접 만들어 적재 경로만 검증한다.)
+ * 개정본 재색인의 핵심: 카테고리 '최신본'만 유지(이전 버전 교체) + 동일 원본의 out/ 콜드스타트 중복 제거.
+ * hash 임베딩으로 Docker MySQL 에 적재한다(전체 pipeline 서브프로세스는 python 의존이라 여기선 chunks.jsonl 직접 작성).
  */
 class ChunkReindexIntegrationTest extends AbstractIntegrationTest {
 
@@ -22,8 +22,16 @@ class ChunkReindexIntegrationTest extends AbstractIntegrationTest {
     @Autowired ChunkEmbeddingRepository repository;
 
     @Test
-    void replaceCategory_keepsOnlyLatestVersion() throws Exception {
-        // v1: 2개 청크 적재
+    void replaceCategory_keepsOnlyLatestAndDedupesColdStart() throws Exception {
+        // out/ 콜드스타트로 적재된 같은 원본(document_id=d_reidx_v1)의 청크 (category=null)
+        Path cold = Files.createTempFile("reidx-cold", ".jsonl");
+        Files.writeString(cold,
+                "{\"chunk_id\":\"c_reidx_cold\",\"document_id\":\"d_reidx_v1\",\"content_type\":\"paragraph\","
+                        + "\"embedding_text\":\"콜드스타트 원본 청크\",\"metadata\":{\"file_name\":\"reidx.pdf\",\"page_no\":1}}\n");
+        ingestService.ingestFile(cold, null);
+        assertThat(repository.findById("c_reidx_cold")).isPresent();
+
+        // v1: 2개 청크 (같은 원본 document_id=d_reidx_v1)
         Path v1 = Files.createTempFile("reidx-v1", ".jsonl");
         Files.writeString(v1,
                 "{\"chunk_id\":\"c_reidx_a1\",\"document_id\":\"d_reidx_v1\",\"content_type\":\"paragraph\","
@@ -31,19 +39,20 @@ class ChunkReindexIntegrationTest extends AbstractIntegrationTest {
                         + "{\"chunk_id\":\"c_reidx_a2\",\"document_id\":\"d_reidx_v1\",\"content_type\":\"paragraph\","
                         + "\"embedding_text\":\"제2조 정의 v1\",\"metadata\":{\"file_name\":\"reidx.pdf\",\"page_no\":1}}\n");
         List<ChunkEmbeddingEntity> e1 = ingestService.readEntities(v1, "reidxcat");
-        ingestService.replaceCategory("reidxcat", e1);
+        ingestService.replaceCategory("reidxcat", "d_reidx_v1", e1);
 
         assertThat(repository.countByCategory("reidxcat")).isEqualTo(2);
-        assertThat(repository.findById("c_reidx_a1")).isPresent();
+        // 동일 원본의 out/ 콜드스타트 청크가 제거되어 검색 중복이 없다
+        assertThat(repository.findById("c_reidx_cold")).isEmpty();
         assertThat(repository.findById("c_reidx_a1").orElseThrow().getCategory()).isEqualTo("reidxcat");
 
-        // v2: 1개 청크 → 이전 버전(v1)은 통째로 교체되어 최신본만 남는다
+        // v2: 1개 청크 (다른 원본 document_id=d_reidx_v2) → 이전 버전(카테고리) 통째 교체 → 최신본만
         Path v2 = Files.createTempFile("reidx-v2", ".jsonl");
         Files.writeString(v2,
                 "{\"chunk_id\":\"c_reidx_b1\",\"document_id\":\"d_reidx_v2\",\"content_type\":\"paragraph\","
                         + "\"embedding_text\":\"제1조 목적 v2 개정\",\"metadata\":{\"file_name\":\"reidx.pdf\",\"page_no\":1}}\n");
         List<ChunkEmbeddingEntity> e2 = ingestService.readEntities(v2, "reidxcat");
-        ingestService.replaceCategory("reidxcat", e2);
+        ingestService.replaceCategory("reidxcat", "d_reidx_v2", e2);
 
         assertThat(repository.countByCategory("reidxcat")).isEqualTo(1);
         assertThat(repository.findById("c_reidx_a1")).isEmpty(); // 이전 버전 청크 삭제됨

@@ -39,7 +39,7 @@ public class PipelineNoticeChunker implements NoticeChunker {
     }
 
     @Override
-    public Path chunk(byte[] pdf) {
+    public Path chunk(byte[] pdf, String fileName) {
         Path tmp;
         try {
             tmp = Files.createTempDirectory("notice-reindex-");
@@ -47,9 +47,11 @@ public class PipelineNoticeChunker implements NoticeChunker {
             throw new UncheckedIOException("재색인 임시 디렉터리 생성 실패", e);
         }
         try {
-            Path pdfPath = tmp.resolve("input.pdf");
+            // 표시용 문서명을 입력 파일명으로 보존 → pipeline 의 file_name/출처 꼬리표가 정확해진다.
+            Path pdfPath = tmp.resolve(sanitizeFileName(fileName));
             Files.write(pdfPath, pdf);
-            Path outDir = tmp.resolve("out");
+            // 산출물(chunks.jsonl 등)을 임시 루트에 직접 둔다 → 호출측이 반환경로의 부모(=tmp)를 통째 정리.
+            Path outDir = tmp;
             Path logFile = tmp.resolve("pipeline.log");
 
             ProcessBuilder pb = new ProcessBuilder(
@@ -81,6 +83,22 @@ public class PipelineNoticeChunker implements NoticeChunker {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("pipeline 대기 중단", e);
         }
+    }
+
+    /** 표시용 문서명을 임시 입력 파일명으로 안전 변환(경로 구분자 제거, .pdf 보장, 산출물명 충돌 회피). */
+    private static String sanitizeFileName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "notice.pdf";
+        }
+        String base = fileName.replaceAll("[\\\\/]", "_").trim();
+        if (base.isBlank()) {
+            base = "notice";
+        }
+        if (base.equals("chunks.jsonl") || base.equals("chunks.xml")
+                || base.equals("manifest.json") || base.equals("pipeline.log")) {
+            base = "src_" + base;
+        }
+        return base.toLowerCase().endsWith(".pdf") ? base : base + ".pdf";
     }
 
     /** 실패 진단용으로 로그 파일 끝부분만 추린다. */
