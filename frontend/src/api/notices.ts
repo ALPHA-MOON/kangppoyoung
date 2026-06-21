@@ -1,12 +1,13 @@
 // 정책 자금 공고 · 문서 버전 관리 (OpenAPI tag: notices)
 import { http } from './client'
 import type {
-  ContentBlock,
+  AssetRef,
   DiffBlock,
   NoticeCategory,
   NoticeCategoryKey,
   NoticeRevisionRequest,
   NoticeVersion,
+  PreprocessResult,
 } from './types'
 
 /** GET /notices/{category} — 공고 또는 참고자료 문서와 버전 목록 조회 */
@@ -32,15 +33,22 @@ export function registerNoticeRevision(
   return http.post<NoticeVersion>(`/notices/${category}/revisions`, revision)
 }
 
-/** POST /notices/{category}/revisions/preprocess — 개정 PDF 업로드 → 텍스트·표·도표 자동 추출(검토용 블록) */
+/** POST /notices/{category}/revisions/preprocess — 개정 PDF 업로드 → 검토용 블록 + 재색인용 sourceRef */
 export function preprocessNoticePdf(
   category: NoticeCategoryKey,
   file: File,
-): Promise<{ blocks: ContentBlock[] }> {
+): Promise<PreprocessResult> {
   const form = new FormData()
   form.append('file', file)
-  return http.postForm<{ blocks: ContentBlock[] }>(
+  return http.postForm<PreprocessResult>(
     `/notices/${category}/revisions/preprocess`,
     form,
   )
+}
+
+/** POST /notices/assets — 검토 단계에서 수동 추가하는 이미지를 콘텐츠 주소 자산으로 업로드 */
+export function uploadNoticeAsset(file: File): Promise<AssetRef> {
+  const form = new FormData()
+  form.append('file', file)
+  return http.postForm<AssetRef>(`/notices/assets`, form)
 }

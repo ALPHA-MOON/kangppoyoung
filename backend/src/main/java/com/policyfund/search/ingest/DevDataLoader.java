@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.util.stream.Stream;
  */
 @Component
 @ConditionalOnProperty(name = "search.ingest.on-startup", havingValue = "true")
+@Order(1) // 공고 부트스트랩(@Order 2)보다 먼저 — out/ 전체를 빈 인덱스에 콜드스타트 적재한 뒤 카테고리 태깅
 public class DevDataLoader implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DevDataLoader.class);

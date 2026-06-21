@@ -37,7 +37,7 @@ class VectorRetrievalAdapterTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return new ChunkEmbeddingEntity(chunkId, docId, fileName, contentType, articleNo,
+        return new ChunkEmbeddingEntity(chunkId, docId, fileName, contentType, articleNo, null,
                 embeddingText, json, vec.length, seqNo, LocalDateTime.now());
     }
 

@@ -24,7 +24,9 @@ import org.testcontainers.containers.MySQLContainer;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(properties = {
         "search.embedding.provider=hash",
-        "search.synth.provider=offline"
+        "search.synth.provider=offline",
+        // 통합 테스트엔 python pipeline 이 없으므로 등록 시 RAG 재색인을 끈다(서브프로세스 미실행).
+        "notices.reindex.enabled=false"
 })
 public abstract class AbstractIntegrationTest {
 

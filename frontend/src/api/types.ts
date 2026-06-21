@@ -1,7 +1,10 @@
 // 백엔드 API 계약(DTO) 타입 — docs/api/openapi.yaml 의 components/schemas 와 1:1 대응.
 // 백엔드 응답/요청의 단일 기준이며, 화면 컴포넌트는 이 타입을 통해서만 서버 데이터를 다룬다.
 
+// 검색·랭킹 근거 문서(Article)·정책문서 종류. openapi components/schemas/DocType(enum)와 1:1.
 export type DocType = '규정' | '지침' | '절차'
+/** 정책 자금 공고 화면 배지용 문서 종류(공고/참고자료 포함). NoticeCategory.docType 에 사용. */
+export type NoticeDocType = DocType | '공고' | '참고자료'
 
 /** PolicyDocument */
 export interface PolicyDocument {
@@ -74,6 +77,8 @@ export interface NoticeVersion {
 export interface NoticeCategory {
   key: 'regulation' | 'reference'
   label: string
+  /** 화면 배지로 표시하는 실제 문서 종류(공고/참고자료 등) */
+  docType: NoticeDocType
   docTitle: string
   /** 날짜 내림차순(최신 먼저) */
   versions: NoticeVersion[]
@@ -86,6 +91,20 @@ export interface NoticeRevisionRequest {
   /** 시행일 (YYYY-MM-DD) */
   effectiveDate: string
   blocks: ContentBlock[]
+  /** 전처리 응답의 sourceRef(원본 PDF 콘텐츠 주소). 등록 후 검색 재색인 입력. 선택값. */
+  sourceRef?: string
+}
+
+/** PreprocessResult — 전처리 응답(검토용 블록 + 재색인용 원본 PDF ref) */
+export interface PreprocessResult {
+  blocks: ContentBlock[]
+  sourceRef: string
+}
+
+/** AssetRef — 자산 업로드 응답(콘텐츠 주소 id + 서빙 URL) */
+export interface AssetRef {
+  id: string
+  url: string
 }
 
 /** DiffBlock */
