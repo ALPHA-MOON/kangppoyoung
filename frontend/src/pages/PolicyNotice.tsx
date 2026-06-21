@@ -376,6 +376,7 @@ function RegisterModal({
   const [step, setStep] = useState<Step>('upload')
   const [fileName, setFileName] = useState('')
   const [procError, setProcError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
   const [date, setDate] = useState('')
   const [blocks, setBlocks] = useState<EditorBlock[]>([])
   const [submitting, setSubmitting] = useState(false)
@@ -510,12 +511,32 @@ function RegisterModal({
           {step === 'upload' && (
             <div>
               <button
+                type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-10 text-slate-400 hover:border-slate-900 hover:text-slate-600"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (!dragOver) setDragOver(true)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  setDragOver(false)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOver(false)
+                  pickPdf(e.dataTransfer.files)
+                }}
+                className={`flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 transition ${
+                  dragOver
+                    ? 'border-slate-900 bg-slate-50 text-slate-600'
+                    : 'border-slate-300 text-slate-400 hover:border-slate-900 hover:text-slate-600'
+                }`}
               >
                 <span className="text-3xl">📄</span>
-                <span className="mt-2 text-sm font-semibold">개정 PDF 파일 선택</span>
-                <span className="mt-0.5 text-xs">PDF를 업로드하면 서버에서 자동으로 전처리됩니다. (최대 50MB)</span>
+                <span className="mt-2 text-sm font-semibold">
+                  {dragOver ? '여기에 놓으세요' : 'PDF를 끌어다 놓거나 클릭해 선택'}
+                </span>
+                <span className="mt-0.5 text-xs">업로드하면 서버에서 자동으로 전처리됩니다. (PDF, 최대 50MB)</span>
               </button>
               {procError && (
                 <div className="mt-3 rounded-lg border-l-4 border-rose-400 bg-rose-50 px-3 py-2 text-sm text-rose-700">
