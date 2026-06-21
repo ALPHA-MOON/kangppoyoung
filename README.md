@@ -19,6 +19,26 @@
 
 > `out/`에는 `source/`의 PDF 3종과 1:1로 매칭되는 정본 산출 폴더만 둔다. 같은 `chunk_id`(결정론적)는 `ChunkIngestService`가 PK upsert로 합치므로 동일 문서를 중복 폴더로 두면 부팅 시 재적재 작업만 늘 뿐 데이터는 중복되지 않는다 — 그래도 폴더는 source와 1:1로 유지하는 것을 권장한다.
 
+## 데이터 흐름
+
+```
+source/ (PDF)
+   │  python -m pipeline   (오프라인·결정론적)
+   ▼
+out/  chunks.xml(구조 정본) + chunks.jsonl(벡터 적재용)
+   │  백엔드 부팅 시 ro 마운트 → chunk_embedding 적재
+   ▼
+자연어 검색  ──코사인 top-k──▶ gpt-4o 답변 합성  ──▶ 응답
+   │
+   ▼
+search_history (질의·답변 이력)
+   │  기간별 분류·집계 (ranking_cache 캐싱)
+   ▼
+질문 분석(랭킹)  ──1:1 환산──▶  온보딩 가이드(대표 질문 + 축적 답변)
+```
+
+> 핵심은 **단방향 파이프라인**(`source/`→`pipeline/`→`out/`→적재)과, 그 위에서 도는 **검색→이력→랭킹→온보딩의 선순환**이다.
+
 ## 빠른 시작 (Docker)
 
 전체 스택은 `mysql`, `backend`(파이프라인 번들), `frontend`, `nginx` 4개 서비스로 구성된다. **호스트로 노출되는 포트는 엣지 nginx 뿐**이며, backend(8080)·frontend(80)는 nginx를 통해서만 접근한다.
@@ -121,7 +141,7 @@ cd backend && ./gradlew test
 **필요한 서비스/프로파일**
 
 - MySQL 8.0이 필요하다. 베이스 `application.yml`에는 datasource가 없으므로 반드시 `SPRING_PROFILES_ACTIVE=local`(localhost:3306) 또는 `docker`(host `mysql`)를 활성화해야 한다. `docker` 프로파일은 `DB_USERNAME`/`DB_PASSWORD`에 기본값이 없어 env로 주입해야 한다.
-- 스키마는 Flyway(`V1`~`V3`)가 소유한다(`ddl-auto=validate`).
+- 스키마는 Flyway(`V1`~`V8`)가 소유한다(`ddl-auto=validate`).
 - **검색 기본값이 OpenAI(`search.embedding.provider=openai`, `search.synth.provider=openai`, `search.retrieval=vector`)이므로 실제 `OPENAI_API_KEY`가 필요하다** — 질의 임베딩·gpt-4o 답변 합성·부팅 시 청크 임베딩 적재가 모두 OpenAI를 호출한다. 추가로 `OpenAiPageVisionExtractor`([소스](backend/src/main/java/com/policyfund/notices/preprocess/OpenAiPageVisionExtractor.java))·질문 분류기도 오프라인 폴백 빈이 없어 OpenAI를 쓴다. `sk-noop`이면 컨텍스트만 뜨고 실제 호출은 실패하며, **빈 문자열이면 컨텍스트가 뜨지 않는다.** 키 없이 돌리려면 provider를 `hash`/`offline`로 전환한다(이 경우 검색은 동작하지만 의미 검색 품질이 낮고 답변은 근거 나열에 그치며, Vision OCR·비캐시 랭킹은 여전히 실패).
 
 **주요 엔드포인트** (베이스 `/api/v1`)
@@ -148,7 +168,7 @@ npm run preview    # 프로덕션 빌드 로컬 미리보기
 
 라우팅 페이지: 통합 검색(`/`) · 정책 자금 공고(`/notice/:category`, `regulation`=공고 / `reference`=참고자료) · 질문 분석(`/ranking`) · 온보딩 가이드(`/onboarding`).
 
-> 현재 Search·PolicyNotice 페이지가 라이브 백엔드에 연결되어 있고(검색·공고 버전관리/diff·개정본 등록), Ranking·Onboarding은 아직 [`src/data/mock.ts`](frontend/src/data/mock.ts)의 목 데이터를 사용한다.
+> 네 화면 모두 라이브 백엔드에 연결되어 있다 — 통합 검색(검색·이력), 공고(버전관리/diff·개정본 등록·전처리), 질문 분석(`getRankings`), 온보딩(`getOnboardingGuide` — 대표 질문 + `search_history` 축적 답변). 통합 검색의 **예시 질문**은 기본값으로 검색 평가 상위 질문 3개를 두고, 사용자가 추가/삭제한 목록을 브라우저 `localStorage`(`search:examples`)에 저장해 페이지 이동·새로고침 후에도 유지한다.
 
 ## 환경 변수
 
@@ -177,15 +197,30 @@ npm run preview    # 프로덕션 빌드 로컬 미리보기
 - **자연어 검색 + 답변 합성** — 정책공고 청크에 대한 RAG 검색. 기본은 OpenAI 의미 임베딩(1536차원) 위 코사인 벡터 검색 + gpt-4o 답변 합성(근거 조항은 실제 검색 상위 5건으로 확정 채움, 중복 요약·상충 표기 포함). 키 없이 돌릴 땐 오프라인 해시 임베딩 + 근거 나열 합성으로, 또는 MySQL FULLTEXT(ngram) 풀텍스트 검색으로 전환 가능. 질의/답변은 검색 이력으로 저장된다.
 - **공고 버전관리 / diff** — 공고(`regulation`)·참고자료(`reference`)를 단일 출처 문서로 버전 누적 관리하고, 직전 버전 대비 LCS 기반 블록 diff(same/add/del)를 제공한다.
 - **질문 랭킹** — 검색 이력을 기간별로 분류·집계해 자주 묻는 질문 카테고리 랭킹을 산출하고 `ranking_cache`에 캐싱한다.
-- **온보딩 가이드** — 랭킹 결과를 1:1로 학습 우선순위 리스트로 변환해 신규 담당자 온보딩에 활용한다.
+- **온보딩 가이드** — 랭킹 결과를 학습 우선순위 리스트로 변환하고, 각 항목에 대표 질문과 그 질문에 대해 `search_history`에 축적된 실제 답변을 함께 노출한다(LLM 임의 생성 아님). 학습 진행 상태는 브라우저 `localStorage`에 저장된다.
 - **PDF 전처리** — PDFBox로 페이지별 텍스트 레이어를 추출하고, 이미지 전용 페이지는 150-DPI PNG로 렌더링 후 Vision OCR로 텍스트화하여 `ContentBlock[]`을 생성한다.
+
+## 개발 워크플로
+
+- **브랜치 전략**: 기본 브랜치는 `master`. 작업은 별도 브랜치에서 진행하고 완료 시 `master`로 머지한다(기본 브랜치 직접 커밋 지양).
+- **커밋 컨벤션**: Conventional Commits(`feat(scope): …` · `fix` · `docs` · `test`). 작업이 끝나면 커밋해 미커밋 상태로 남기지 않는다.
+- **빌드/테스트 게이트(커밋 전 확인)**: 프론트 `cd frontend && npm run build`(tsc 타입체크 + vite) · 백엔드 `cd backend && ./gradlew test`(통합테스트는 Docker/Testcontainers MySQL 필요) · 파이프라인 `pytest`(루트).
+- **문서 동기화(docs-first)**: 기능·API·데이터모델·구조 변경은 코드와 함께 문서를 갱신한다 — API 계약은 `docs/api/openapi.yaml` ↔ 백엔드 DTO ↔ 프론트 `src/api/types.ts`를 일치시키고, 구조 변경은 `CLAUDE.md`, 운영 변경은 이 `README.md`를 갱신한다.
+
+## 트러블슈팅
+
+- **백엔드 부팅 실패 / 검색·적재 오류** — 기본 검색이 OpenAI 모드라 실제 `OPENAI_API_KEY`가 필요하다. **빈 문자열이면 컨텍스트 자체가 뜨지 않고**, `sk-noop`이면 기동은 되나 검색·부팅 적재가 실패한다. 키 없이 돌리려면 `SEARCH_EMBEDDING_PROVIDER=hash`·`SEARCH_SYNTH_PROVIDER=offline`로 전환한다(의미 검색 품질↓, 답변은 근거 나열에 그치고 Vision OCR·비캐시 랭킹은 여전히 실패).
+- **검색 결과 0건** — `out/`에 `chunks.jsonl`이 없으면 `chunk_embedding`이 비어 검색 결과가 비어 나온다. 먼저 `python -m pipeline …`로 `out/`을 생성한다.
+- **`docker compose up` 포트 충돌** — 호스트 80이 점유 중이면 `NGINX_PORT=8088 docker compose up --build`로 엣지 포트를 바꾼다(백엔드 8080·프론트 80은 호스트로 노출되지 않음).
+- **datasource 없음 / DB 연결 실패** — 베이스 `application.yml`엔 datasource가 없다. 반드시 `SPRING_PROFILES_ACTIVE=local`(localhost:3306) 또는 `docker`(host `mysql`)를 지정한다. `docker` 프로파일은 `DB_USERNAME`/`DB_PASSWORD` 기본값이 없어 env 주입이 필수다.
+- **DB 기본 비밀번호 불일치** — `.env.example`은 `DB_PASSWORD=change-me`지만 `local` 프로파일 코드 기본값은 `policyfund`다(출처가 달라 혼동 주의).
 
 ## 문서
 
 - API 계약: [`docs/api/openapi.yaml`](docs/api/openapi.yaml) (OpenAPI 3.1, `/api/v1`, 11개 오퍼레이션 / 경로 10개)
 - 사용자 플로우: [`docs/user_flow/user_flow.md`](docs/user_flow/user_flow.md) — 제품(프론트)+백엔드 처리 흐름을 합친 **단일 정본**(UC별 화면·백엔드·핵심규칙)
-- 검색 평가: 세트 [`docs/eval/search-eval.md`](docs/eval/search-eval.md) · 결과 베이스라인 [`docs/eval/results-2026-06-20-baseline.md`](docs/eval/results-2026-06-20-baseline.md)
-- 향후 구현 계획: [`docs/plan/search-history-sidebar-plan.md`](docs/plan/search-history-sidebar-plan.md) (검색 기록 좌측 사이드바 노출)
+- 검색 평가: 세트 [`docs/eval/search-eval.md`](docs/eval/search-eval.md) · 결과(2026-06-20): 베이스라인 · 10회 평균([`results-2026-06-20-avg10.md`](docs/eval/results-2026-06-20-avg10.md)) · 머지/리트리벌 변형 등 [`docs/eval/`](docs/eval/)
+- 구현 계획: [`docs/plan/rankings-onboarding-wiring-plan.md`](docs/plan/rankings-onboarding-wiring-plan.md) (질문 분석·온보딩 백엔드 연동)
 - 제품·기술 요구사항(PRD): [`docs/prd/PRD.md`](docs/prd/PRD.md) — 제품·백엔드·파이프라인을 통합한 **단일 정본**(UC·FR·데이터모델·API계약·파이프라인 계약·NFR·로드맵). 기준선은 [`docs/user_flow/user_flow.md`](docs/user_flow/user_flow.md)
 
 > 참고: 일부 설계 문서는 Java 25 / 패키지 `kr.co.hakjisa.policyfund`를 언급하나, 실제 코드는 **Java 21 / 패키지 `com.policyfund`** 가 기준이다.
