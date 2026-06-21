@@ -31,6 +31,10 @@ public class ChunkEmbeddingEntity {
     @Column(name = "article_no")
     private String articleNo;
 
+    /** 공고 카테고리(regulation/reference) 태그. NULL = 공고와 무관(검색 부트스트랩 적재분). */
+    @Column(name = "category")
+    private String category;
+
     @Column(name = "embedding_text")
     private String embeddingText;
 
@@ -50,13 +54,14 @@ public class ChunkEmbeddingEntity {
     protected ChunkEmbeddingEntity() {}
 
     public ChunkEmbeddingEntity(String chunkId, String documentId, String fileName, String contentType,
-                                String articleNo, String embeddingText, String embeddingJson, int dim,
-                                int seqNo, LocalDateTime createdAt) {
+                                String articleNo, String category, String embeddingText, String embeddingJson,
+                                int dim, int seqNo, LocalDateTime createdAt) {
         this.chunkId = chunkId;
         this.documentId = documentId;
         this.fileName = fileName;
         this.contentType = contentType;
         this.articleNo = articleNo;
+        this.category = category;
         this.embeddingText = embeddingText;
         this.embeddingJson = embeddingJson;
         this.dim = dim;
@@ -69,6 +74,7 @@ public class ChunkEmbeddingEntity {
     public String getFileName() { return fileName; }
     public String getContentType() { return contentType; }
     public String getArticleNo() { return articleNo; }
+    public String getCategory() { return category; }
     public String getEmbeddingText() { return embeddingText; }
     public String getEmbeddingJson() { return embeddingJson; }
     public int getDim() { return dim; }

@@ -3,3 +3,13 @@ spring:
     url: jdbc:mysql://mysql:3306/policyfund?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+
+# 컨테이너에는 source/ 가 마운트되고 python pipeline 이 번들돼 있다. 최초 부팅 시 원본 공고를
+# 각 카테고리의 v1 으로 시드하고 검색 인덱스를 색인한다(해당 카테고리에 버전이 없을 때만 1회).
+notices:
+  bootstrap:
+    enabled: true
+    effective-date: 2026-01-01
+    sources:
+      regulation: "source/1. 2026년 중소기업 정책자금 융자계획 변경공고(제2026-287호).pdf"
+      reference: "source/2. 2026년 중소기업 정책자금 융자공고(참고자료).pdf"

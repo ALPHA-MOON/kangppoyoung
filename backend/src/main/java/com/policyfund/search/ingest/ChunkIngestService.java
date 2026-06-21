@@ -6,6 +6,7 @@ import com.policyfund.search.embedding.ChunkEmbeddingEntity;
 import com.policyfund.search.embedding.ChunkEmbeddingRepository;
 import com.policyfund.search.embedding.EmbeddingProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,6 +21,9 @@ import java.util.List;
 /**
  * pipeline 의 chunks.jsonl 한 줄당 한 레코드를 읽어 임베딩을 계산하고 chunk_embedding 에 적재한다.
  * chunk_id 가 PK 이므로 save 는 upsert(멱등)다. embedding_text 가 비면 건너뛴다.
+ *
+ * 임베딩 계산(느림·네트워크)과 DB 쓰기를 분리한다: {@link #readEntities}로 엔티티를 만들고(트랜잭션 밖),
+ * {@link #replaceCategory}로 짧은 트랜잭션 안에서 카테고리 단위 교체(개정본 재색인)를 수행한다.
  */
 @Service
 public class ChunkIngestService {
@@ -33,22 +37,42 @@ public class ChunkIngestService {
         this.repository = repository;
     }
 
-    /** 파일 경로의 jsonl 을 적재한다. 적재된 레코드 수를 반환. */
+    /** 파일 경로의 jsonl 을 카테고리 태그 없이 적재한다(검색 부트스트랩). 적재 수 반환. */
     public int ingestFile(Path jsonlPath) {
+        return ingestFile(jsonlPath, null);
+    }
+
+    /** 파일 경로의 jsonl 을 주어진 카테고리 태그로 적재한다. 적재 수 반환. */
+    public int ingestFile(Path jsonlPath, String category) {
+        List<ChunkEmbeddingEntity> entities = readEntities(jsonlPath, category);
+        repository.saveAll(entities);
+        return entities.size();
+    }
+
+    /** reader 의 jsonl 을 적재한다(카테고리 태그 없음). */
+    public int ingestJsonl(BufferedReader reader) {
+        List<ChunkEmbeddingEntity> entities = readEntities(reader, null);
+        repository.saveAll(entities);
+        return entities.size();
+    }
+
+    /** jsonl 파일을 파싱·임베딩해 엔티티 목록을 만든다(저장하지 않음). 카테고리는 각 엔티티에 태깅. */
+    public List<ChunkEmbeddingEntity> readEntities(Path jsonlPath, String category) {
         try (BufferedReader reader = Files.newBufferedReader(jsonlPath, StandardCharsets.UTF_8)) {
-            return ingestJsonl(reader);
+            return readEntities(reader, category);
         } catch (IOException e) {
             throw new UncheckedIOException("chunks.jsonl 적재 실패: " + jsonlPath, e);
         }
     }
 
-    /** reader 의 jsonl 을 적재한다. 빈 줄·embedding_text 공백 레코드는 건너뛰고 적재 수를 반환. */
-    public int ingestJsonl(BufferedReader reader) {
-        int count = 0;
+    /** reader 의 jsonl 을 파싱·임베딩해 엔티티 목록을 만든다(저장하지 않음). */
+    public List<ChunkEmbeddingEntity> readEntities(BufferedReader reader, String category) {
+        List<ChunkEmbeddingEntity> entities = new ArrayList<>();
         try {
             String line;
             // seq_no: 적재되는(=DB 에 들어가는) 청크에만 문서 내 0-based 순번을 reading order 로 부여한다.
             // 건너뛴 레코드는 순번을 소비하지 않아 DB 행끼리 연속 seq 를 유지(이웃 확장이 정확).
+            int seq = 0;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) {
                     continue;
@@ -58,17 +82,26 @@ public class ChunkIngestService {
                 if (embeddingText == null || embeddingText.isBlank()) {
                     continue;
                 }
-                ChunkEmbeddingEntity entity = toEntity(record, embeddingText, count);
-                repository.save(entity);
-                count++;
+                entities.add(toEntity(record, embeddingText, seq, category));
+                seq++;
             }
         } catch (IOException e) {
             throw new UncheckedIOException("chunks.jsonl 파싱 실패", e);
         }
-        return count;
+        return entities;
     }
 
-    private ChunkEmbeddingEntity toEntity(JsonNode record, String embeddingText, int seqNo) throws IOException {
+    /**
+     * 카테고리 단위 '최신본' 교체: 해당 카테고리의 기존 청크를 모두 지우고 새 청크로 대체한다.
+     * 임베딩은 호출 전에 계산해 두고(readEntities), 이 메서드는 짧은 트랜잭션에서 삭제+삽입만 한다.
+     */
+    @Transactional
+    public void replaceCategory(String category, List<ChunkEmbeddingEntity> entities) {
+        repository.deleteByCategory(category);
+        repository.saveAll(entities);
+    }
+
+    private ChunkEmbeddingEntity toEntity(JsonNode record, String embeddingText, int seqNo, String category) throws IOException {
         String chunkId = text(record.get("chunk_id"));
         String documentId = text(record.get("document_id"));
         String contentType = text(record.get("content_type"));
@@ -79,7 +112,7 @@ public class ChunkIngestService {
         float[] vector = embeddingProvider.embed(embeddingText);
         String embeddingJson = objectMapper.writeValueAsString(vector);
 
-        return new ChunkEmbeddingEntity(chunkId, documentId, fileName, contentType, articleNo,
+        return new ChunkEmbeddingEntity(chunkId, documentId, fileName, contentType, articleNo, category,
                 embeddingText, embeddingJson, vector.length, seqNo, LocalDateTime.now());
     }
 

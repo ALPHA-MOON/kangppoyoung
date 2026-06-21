@@ -34,6 +34,16 @@ search:
   ingest:
     on-startup: true
 
+# 개정본 등록 시 검색 인덱스를 그 카테고리 '최신본'으로 재색인(번들된 python pipeline 사용).
+# 운영 컨테이너엔 pipeline 이 함께 실려 있어 기본 활성. 비동기로 동작하며 실패는 등록에 영향 없음.
+notices:
+  reindex:
+    enabled: true
+    # chunker: pipeline           # 기본. 다른 구현으로 교체 시 변경
+    # python: ${PIPELINE_PYTHON:python3}
+    # pipeline-dir: .             # `python -m pipeline` 가 pipeline 패키지를 찾는 작업 디렉터리(컨테이너=/app)
+    # timeout-seconds: 300
+
 server:
   port: 8080
   error:

@@ -95,9 +95,10 @@ export default function PolicyNotice() {
     }
   }, [category, current?.version, previous?.version])
 
-  async function handleRegister(date: string, blocks: ContentBlock[]) {
+  async function handleRegister(date: string, blocks: ContentBlock[], sourceRef?: string) {
     // 실패 시 throw → 모달이 잡아서 에러를 표시하고 열린 채로 유지.
-    await registerNoticeRevision(category, { effectiveDate: date, blocks })
+    // sourceRef(원본 PDF) 를 함께 보내면 등록 후 백엔드가 검색 인덱스를 이 카테고리 최신본으로 재색인한다.
+    await registerNoticeRevision(category, { effectiveDate: date, blocks, sourceRef })
     await reload(true) // 새 최신본이 versions[0]
     setShowRegister(false)
   }
@@ -370,7 +371,7 @@ function RegisterModal({
   docTitle: string
   previous?: NoticeVersion
   onClose: () => void
-  onSubmit: (date: string, blocks: ContentBlock[]) => Promise<void>
+  onSubmit: (date: string, blocks: ContentBlock[], sourceRef?: string) => Promise<void>
 }) {
   const [step, setStep] = useState<Step>('upload')
   const [fileName, setFileName] = useState('')
@@ -381,6 +382,8 @@ function RegisterModal({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [imgError, setImgError] = useState<string | null>(null)
   const [imgUploading, setImgUploading] = useState(false)
+  // 전처리가 보관한 원본 PDF 의 ref — 등록 시 함께 보내 검색 재색인 입력으로 쓰인다.
+  const [sourceRef, setSourceRef] = useState<string | undefined>(undefined)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageRef = useRef<HTMLInputElement>(null)
   // 진행 중 비동기(전처리/이미지 업로드) 응답이 도착하기 전에 모달이 닫히면 setState 를 건너뛴다.
@@ -412,6 +415,7 @@ function RegisterModal({
       const res = await preprocessNoticePdf(category, f)
       if (!aliveRef.current) return
       setBlocks(res.blocks.map((b) => ({ ...b, id: blockId++ })))
+      setSourceRef(res.sourceRef)
       setStep('review')
     } catch (e) {
       if (!aliveRef.current) return
@@ -477,7 +481,7 @@ function RegisterModal({
     setSubmitting(true)
     setSubmitError(null)
     try {
-      await onSubmit(date, clean) // 성공 시 부모가 모달을 언마운트
+      await onSubmit(date, clean, sourceRef) // 성공 시 부모가 모달을 언마운트
     } catch (e) {
       setSubmitError(errMsg(e, '등록 중 오류가 발생했습니다.'))
       setSubmitting(false)

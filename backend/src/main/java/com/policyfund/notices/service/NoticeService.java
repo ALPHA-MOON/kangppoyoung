@@ -11,6 +11,8 @@ import com.policyfund.notices.dto.DiffBlock;
 import com.policyfund.notices.dto.NoticeCategoryDto;
 import com.policyfund.notices.dto.NoticeRevisionRequest;
 import com.policyfund.notices.dto.NoticeVersionDto;
+import com.policyfund.notices.rag.NoticeSourceStorage;
+import com.policyfund.notices.rag.RagReindexService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +25,15 @@ public class NoticeService {
 
     private final NoticeCategoryRepository categories;
     private final NoticeVersionRepository versions;
+    private final RagReindexService reindexService;
+    private final NoticeSourceStorage sourceStorage;
 
-    public NoticeService(NoticeCategoryRepository categories, NoticeVersionRepository versions) {
+    public NoticeService(NoticeCategoryRepository categories, NoticeVersionRepository versions,
+                         RagReindexService reindexService, NoticeSourceStorage sourceStorage) {
         this.categories = categories;
         this.versions = versions;
+        this.reindexService = reindexService;
+        this.sourceStorage = sourceStorage;
     }
 
     /** 버전 정렬 기준: 시행일 오름차순, 동일 시행일은 버전번호(숫자) 오름차순. getNotice/diff 가 공유한다. */
@@ -77,6 +84,13 @@ public class NoticeService {
 
         var saved = versions.save(new NoticeVersionEntity(
                 category, "v" + next, request.effectiveDate(), request.blocks()));
+
+        // 새 최신본 등록 → 해당 카테고리 검색 인덱스를 원본 PDF 기준으로 비동기 재색인(최신본만 유지).
+        // sourceRef 가 없으면(원본 PDF 미보관) 재색인을 건너뛴다. 재색인 실패는 등록에 영향 없음.
+        if (request.sourceRef() != null && !request.sourceRef().isBlank()) {
+            sourceStorage.load(request.sourceRef())
+                    .ifPresent(pdf -> reindexService.reindex(category, pdf));
+        }
 
         return toDto(saved);
     }

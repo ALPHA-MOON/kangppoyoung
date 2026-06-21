@@ -30,6 +30,8 @@ services:
     volumes:
       # 파이프라인 산출물(out/**/chunks.jsonl)을 읽기전용으로 마운트 → 부팅 시 벡터DB 자동 적재.
       - ./out:/app/out:ro
+      # 원본 공고 PDF — 최초 부팅 시 각 카테고리 v1 시드 + 재색인 입력(notices.bootstrap).
+      - ./source:/app/source:ro
 
   frontend:
     # Vite 정적 빌드를 자체 nginx 로 서빙(SPA 폴백). 엣지 nginx 가 / 를 이 서비스로 프록시.

@@ -8,4 +8,9 @@ import java.util.List;
 public interface ChunkEmbeddingRepository extends JpaRepository<ChunkEmbeddingEntity, String> {
 
     List<ChunkEmbeddingEntity> findByDocumentId(String documentId);
+
+    /** 카테고리 최신본 교체(개정본 등록 재색인) 시 이전 버전 청크 일괄 삭제. */
+    long deleteByCategory(String category);
+
+    long countByCategory(String category);
 }

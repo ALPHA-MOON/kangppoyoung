@@ -44,9 +44,12 @@ class ChunkIngestServiceTest {
 
         assertThat(count).isEqualTo(2);
 
-        ArgumentCaptor<ChunkEmbeddingEntity> captor = ArgumentCaptor.forClass(ChunkEmbeddingEntity.class);
-        verify(repository, times(2)).save(captor.capture());
-        List<ChunkEmbeddingEntity> saved = captor.getAllValues();
+        // 임베딩 계산과 DB 쓰기를 분리해 한 번의 saveAll 로 적재한다(긴 트랜잭션 방지).
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChunkEmbeddingEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository, times(1)).saveAll(captor.capture());
+        List<ChunkEmbeddingEntity> saved = captor.getValue();
+        assertThat(saved).hasSize(2);
 
         ChunkEmbeddingEntity first = saved.get(0);
         assertThat(first.getChunkId()).isEqualTo("c1");

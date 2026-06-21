@@ -1,12 +1,14 @@
 package com.policyfund.notices.web;
 
 import jakarta.validation.Valid;
+import com.policyfund.notices.dto.ContentBlock;
 import com.policyfund.notices.dto.DiffBlock;
 import com.policyfund.notices.dto.NoticeCategoryDto;
 import com.policyfund.notices.dto.NoticeRevisionRequest;
 import com.policyfund.notices.dto.NoticeVersionDto;
 import com.policyfund.notices.preprocess.PdfPreprocessService;
 import com.policyfund.notices.preprocess.PreprocessResponse;
+import com.policyfund.notices.rag.NoticeSourceStorage;
 import com.policyfund.notices.service.NoticeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,10 +31,13 @@ public class NoticeController {
 
     private final NoticeService service;
     private final PdfPreprocessService preprocessService;
+    private final NoticeSourceStorage sourceStorage;
 
-    public NoticeController(NoticeService service, PdfPreprocessService preprocessService) {
+    public NoticeController(NoticeService service, PdfPreprocessService preprocessService,
+                           NoticeSourceStorage sourceStorage) {
         this.service = service;
         this.preprocessService = preprocessService;
+        this.sourceStorage = sourceStorage;
     }
 
     @GetMapping("/{category}")
@@ -57,8 +62,11 @@ public class NoticeController {
     public PreprocessResponse preprocess(@PathVariable String category,
                                          @RequestParam("file") MultipartFile file) {
         try {
-            return new PreprocessResponse(
-                    preprocessService.preprocess(file.getBytes(), file.getContentType()));
+            byte[] bytes = file.getBytes();
+            // 먼저 검증·추출(비PDF면 여기서 400). 통과한 원본만 재색인용으로 보관하고 ref 를 돌려준다.
+            List<ContentBlock> blocks = preprocessService.preprocess(bytes, file.getContentType());
+            String sourceRef = sourceStorage.store(bytes);
+            return new PreprocessResponse(blocks, sourceRef);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

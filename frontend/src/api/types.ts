@@ -91,6 +91,14 @@ export interface NoticeRevisionRequest {
   /** 시행일 (YYYY-MM-DD) */
   effectiveDate: string
   blocks: ContentBlock[]
+  /** 전처리 응답의 sourceRef(원본 PDF 콘텐츠 주소). 등록 후 검색 재색인 입력. 선택값. */
+  sourceRef?: string
+}
+
+/** PreprocessResult — 전처리 응답(검토용 블록 + 재색인용 원본 PDF ref) */
+export interface PreprocessResult {
+  blocks: ContentBlock[]
+  sourceRef: string
 }
 
 /** AssetRef — 자산 업로드 응답(콘텐츠 주소 id + 서빙 URL) */
