@@ -3,7 +3,7 @@ import { getOnboardingGuide } from '../api/onboarding'
 import { RANKING_PERIODS } from '../api/periods'
 import type { OnboardingItem } from '../api/types'
 import { ApiError } from '../api/client'
-import { ArticleCard, Card, PageHeader, SectionLabel } from '../components/ui'
+import { Card, PageHeader, SectionLabel } from '../components/ui'
 
 // UC-5: 신규입사자 온보딩.
 // 핵심 — 별도 추천 로직이 아니라 UC-4 랭킹(실무자가 많이 검색한 순)을 그대로 학습 우선순위로 환산한다.
@@ -155,10 +155,18 @@ export default function Onboarding() {
                     <p className="mt-1 text-xs text-indigo-600">📌 선정 근거: {item.reason}</p>
 
                     <div className="mt-3 space-y-2">
-                      <SectionLabel>먼저 볼 문서·조항</SectionLabel>
-                      {item.relatedArticles.map((a, i) => (
-                        <ArticleCard key={i} article={a} />
-                      ))}
+                      <SectionLabel>대표 질문</SectionLabel>
+                      <p className="text-sm text-slate-700">"{item.questionExample}"</p>
+                      <SectionLabel>답변</SectionLabel>
+                      {item.answer ? (
+                        <p className="whitespace-pre-line rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">
+                          {item.answer}
+                        </p>
+                      ) : (
+                        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-400">
+                          아직 축적된 답변이 없습니다. 통합 검색에서 이 질문이 응답되면 여기에 표시됩니다.
+                        </p>
+                      )}
                     </div>
 
                     <button

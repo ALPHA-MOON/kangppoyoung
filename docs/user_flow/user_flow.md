@@ -450,7 +450,7 @@
 [로딩/에러/빈] 조회 중 로딩, ApiError 시 에러 카드, 결과 0건이면 '학습 항목이 없습니다' 빈 상태
 [커리큘럼] 기간 버튼(7일/30일) 전환 → 재조회 → 커리큘럼(order 오름차순) 갱신
    → 각 STEP 카드: 순번(order), 카테고리 + '학습 N순위'(order), 선정 근거(서버 OnboardingItem.reason 문자열 그대로),
-     '먼저 볼 문서·조항'(ArticleCard) — 대표 질문(questionExample)은 OnboardingItem에 없어 표시하지 않음
+     대표 질문(questionExample) + 답변(answer, search_history 축적 답변·빈 문자열이면 안내 문구) — '먼저 볼 문서·조항'(relatedArticles)은 제거(미표시)
 [진행률] 학습 진행률 바: doneCount/total(emerald 바, 빈 결과 div-by-zero 가드)
    → '학습 완료로 표시'/'학습 완료됨 ✓' 토글 → 카드 흐려짐(opacity-60), 진행률 반영 → localStorage('onboarding:done')에 영속
 ```
@@ -461,19 +461,20 @@
 [요청 수신] OnboardingController.onboarding(period default '최근 30일')
 [랭킹 위임] OnboardingService.onboarding(period) @Transactional
    → RankingService.rankings(period) 재사용(별도 추천 로직 없음)
-   → 각 RankingItem → OnboardingItem(order 1.., category,
-        reason='실무자 검색 N회·조회 M회로 우선순위가 높습니다.', searchCount, viewCount, relatedArticles)
+   → 각 RankingItem → OnboardingItem(order 1.., category, questionExample,
+        answer(search_history에서 대표 질문 기준 조회·정확 일치 우선·부분 일치 폴백·미매칭 시 ''),
+        reason='실무자 검색 N회·조회 M회로 우선순위가 높습니다.', searchCount, viewCount)
 [응답] 200 OnboardingItem[](빈도순=학습순, order 오름차순)
 ```
 
 #### (c) 핵심 규칙 (병합)
-- 온보딩의 **유일한 데이터 소스는 UC-4 랭킹**이며 별도 추천 로직(임의 추천)을 두지 않는다.
+- 온보딩의 데이터 소스는 **UC-4 랭킹과 그 대표 질문의 `search_history` 축적 답변뿐**이며, 별도 추천 로직(임의 추천·LLM 생성 답변)을 두지 않는다.
 - 각 학습 항목은 **선정 근거(검색/조회 N회)를 반드시 표시**한다.
 - 커리큘럼 순서 = 랭킹 rank 오름차순(rank가 곧 학습 순서). 기간 변화로 랭킹이 바뀌면 온보딩 우선순위도
   **자동 최신화**된다(선순환). 신규입사자의 질의·조회도 DB에 누적되어 랭킹에 재반영된다.
 - `period` 기본값 '최근 30일'(선택, OpenAPI 계약과 일치).
 - `RankingService`를 위임 호출하므로 rankings의 모든 규칙·한계(`trend='same'`, count 동일, OpenAI 의존)를 **그대로 승계**.
-- 프론트 규칙: 진행률 = 완료 항목 수/전체*100%(빈 결과 0% 가드), done 상태는 **order 키로 `localStorage`(`onboarding:done`)에 영속**(새로고침에도 유지, 기간 무관 공유). 선정 근거는 서버 `reason`을 그대로 표시(인라인 재조립 없음), 대표 질문은 표시하지 않는다(OnboardingItem에 questionExample 없음).
+- 프론트 규칙: 진행률 = 완료 항목 수/전체*100%(빈 결과 0% 가드), done 상태는 **order 키로 `localStorage`(`onboarding:done`)에 영속**(새로고침에도 유지, 기간 무관 공유). 선정 근거는 서버 `reason`을 그대로 표시(인라인 재조립 없음), **대표 질문(questionExample)과 답변(answer)을 함께 표시**하고 '먼저 볼 문서·조항'(relatedArticles)은 표시하지 않는다(제거).
 
 ---
 
@@ -540,7 +541,7 @@
 | UC-3 | `/notice` → `/notice/regulation` | (리다이렉트) | `[구현됨]` | replace 리다이렉트 |
 | UC-3 | `/notice/regulation`, `/notice/reference` | 정책 자금 공고(공고/참고자료) | `[구현됨]` | 날짜 내림차순 버전 드랍, 3단계 등록 마법사(서버 전처리·등록·자산 업로드), 바로 전 버전 diff(추가 초록/삭제 빨강), 실제 docType 배지, 백데이트 금지 |
 | UC-4 | `/ranking` | 질문 분석 | `[구현됨]` | 기간별 카테고리·랭킹(getRankings), 검색 빈도 막대, 트렌드 아이콘(up/down만), 로딩/에러/빈 상태 |
-| UC-5 | `/onboarding` | 온보딩 가이드 | `[구현됨]` | UC-4 랭킹 → 학습 우선순위 환산(getOnboardingGuide), 서버 reason 표시, 진행률(localStorage 영속) |
+| UC-5 | `/onboarding` | 온보딩 가이드 | `[구현됨]` | UC-4 랭킹 → 학습 우선순위 환산(getOnboardingGuide), 선정 근거(reason)+대표 질문·답변(축적 답변) 표시, 진행률(localStorage 영속) |
 
 > 전역 네비게이션: 좌측 고정 `Sidebar.tsx`(항상 마운트, 채팅 기록 context 전역 구독), 메인은 `max-w-4xl`
 > 중앙 정렬·overflow-y-auto. '정책 자금 공고' 그룹은 `location.pathname.startsWith('/notice')`면 기본 펼침.
